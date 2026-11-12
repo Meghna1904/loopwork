@@ -20,3 +20,12 @@
   --shadow-card: none;
   --tracking-display: -0.02em; --display-weight: 400; --display-optical: 96;
 }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-paper: oklch(19% 0.012 60); --color-paper-2: oklch(23% 0.014 60); --color-paper-3: oklch(28% 0.016 60);
+  --color-ink: oklch(93% 0.008 80); --color-ink-2: oklch(82% 0.01 75); --color-muted: oklch(68% 0.012 75);
+  --color-rule: oklch(37% 0.012 70); --color-rule-2: oklch(48% 0.014 70);
+  --color-accent: oklch(72% 0.14 262); --color-accent-ink: oklch(18% 0.012 60); --color-focus: oklch(74% 0.13 262);
+  --color-guide: oklch(72% 0.14 262 / 0.58);
+  --color-error: oklch(70% 0.16 27); --color-success: oklch(72% 0.12 150);
+}

@@ -1,4 +1,5 @@
 const STORAGE_KEY = "loopwork-projects-v1";
+const THEME_KEY = "loopwork-theme-v1";
 const SAMPLE_PATTERN = `Round 1: 6 SC in MR
 Round 2: (1 SC, INC) × 6
 Round 3: (2 SC, INC) × 6
@@ -227,6 +228,19 @@ let pendingDeleteProjectId = null;
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+function applyTheme(theme) {
+  const dark = theme === "dark";
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  const toggle = $("#theme-toggle");
+  toggle.textContent = dark ? "Light mode" : "Dark mode";
+  toggle.setAttribute("aria-pressed", String(dark));
+  toggle.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
+  $("meta[name='theme-color']").content = dark ? "#191918" : "#f5f0e5";
+}
+function setTheme(theme) {
+  applyTheme(theme);
+  localStorage.setItem(THEME_KEY, theme);
+}
 const activeProject = () => projects.find((project) => project.id === activeProjectId) || projects[0];
 const currentRound = () => {
   const project = activeProject();
@@ -598,6 +612,7 @@ $("#confirm-delete-project").addEventListener("click", deleteProject);
 $("#cancel-delete-project").addEventListener("click", () => $("#delete-project-dialog").close());
 $("#delete-project-dialog").addEventListener("close", () => { pendingDeleteProjectId = null; });
 $("#open-patterns").addEventListener("click", () => openDialog());
+$("#theme-toggle").addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
 $("#edit-pattern-inline").addEventListener("click", () => openDialog());
 $("#rename-project").addEventListener("click", () => openDialog());
 $("#complete-next").addEventListener("click", completeNext);
@@ -620,4 +635,5 @@ document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); undo(); }
 });
 
+applyTheme(document.documentElement.dataset.theme || "light");
 render();

@@ -6,6 +6,11 @@
     <meta name="theme-color" content="#f5f0e5" />
     <meta name="description" content="A stitch-by-stitch crochet pattern companion." />
     <title>Loopwork · Crochet pattern companion</title>
+    <script>
+      try {
+        if (localStorage.getItem("loopwork-theme-v1") === "dark") document.documentElement.dataset.theme = "dark";
+      } catch { /* use the light theme when browser storage is unavailable */ }
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -19,6 +24,7 @@
       <div class="topbar-center">A calmer way to follow a pattern</div>
       <div class="topbar-actions">
         <span class="save-state" id="save-state" role="status">Saved on this device</span>
+        <button class="button button-quiet theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Dark mode</button>
         <button class="button button-quiet" id="open-patterns" type="button">Edit pattern</button>
       </div>
     </header>

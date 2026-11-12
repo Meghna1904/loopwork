@@ -6,6 +6,7 @@
 @import url("./base.css");
 
 :root { --rail-width: 236px; --work-width: 1480px; --color-backdrop: oklch(17% 0.012 60 / .48); }
+:root[data-theme="dark"] { --color-backdrop: oklch(4% 0 0 / .78); }
 html, body { min-height: 100%; }
 button, input, textarea { color: var(--color-ink); }
 button { cursor: pointer; }
@@ -19,6 +20,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .topbar-center { color: var(--color-muted); font-size: 13px; }
 .topbar-actions { justify-self: end; display: flex; align-items: center; gap: var(--space-lg); }
 .save-state { color: var(--color-muted); font-size: 12px; }
+.theme-toggle { border-color: var(--color-rule); color: var(--color-ink-2); }
 .button { min-height: 38px; border: 1px solid var(--color-ink); padding: 0 var(--space-md); font-size: 13px; font-weight: 500; white-space: nowrap; transition: background-color var(--dur-short) var(--ease-out), color var(--dur-short) var(--ease-out), transform var(--dur-micro) var(--ease-out); }
 .button:active:not(:disabled) { transform: translateY(1px); }
 .button-primary { color: var(--color-paper); background: var(--color-ink); }
@@ -180,6 +182,8 @@ kbd { padding: var(--space-3xs) var(--space-2xs); border: 1px solid var(--color-
 }
 @media (max-width: 48rem) {
   .topbar { grid-template-columns: 1fr auto; padding-inline: var(--space-md); }
+  .topbar-actions { gap: var(--space-2xs); }
+  .theme-toggle { padding-inline: var(--space-xs); }
   .topbar-center, .save-state { display: none; }
   .app-shell { grid-template-columns: minmax(0, 1fr); }
   .project-rail { padding: var(--space-sm) var(--space-md); border-right: 0; border-bottom: 1px solid var(--color-rule); }
@@ -211,6 +215,7 @@ kbd { padding: var(--space-3xs) var(--space-2xs); border: 1px solid var(--color-
   .project-item { padding-block: var(--space-xs); }
   .project-delete { opacity: 1; }
   .workspace-heading h1 { font-size: 1.85rem; }
+  .theme-toggle { font-size: 11px; }
   .round-topline h2 { font-size: 1.7rem; }
   .round-topline > div:first-child { min-width: 0; }
   .next-up { padding: var(--space-sm); }
