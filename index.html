@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f5f0e5" />
+    <meta name="description" content="A stitch-by-stitch crochet pattern companion." />
+    <title>Loopwork · Crochet pattern companion</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./app.css" />
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to work area</a>
+    <header class="topbar">
+      <a class="wordmark" href="#" aria-label="Loopwork home">Loopwork<span>.</span></a>
+      <div class="topbar-center">A calmer way to follow a pattern</div>
+      <div class="topbar-actions">
+        <span class="save-state" id="save-state" role="status">Saved on this device</span>
+        <button class="button button-quiet" id="open-patterns" type="button">Edit pattern</button>
+      </div>
+    </header>
+
+    <div class="app-shell">
+      <aside class="project-rail" aria-label="Project navigation">
+        <div class="rail-heading">
+          <h2>My projects</h2>
+          <button class="icon-button" id="new-project" type="button" aria-label="Create a project" title="Create a project">+</button>
+        </div>
+        <div class="project-list" id="project-list"></div>
+        <div class="rail-note">
+          <span class="note-rule"></span>
+          <p>Your work stays in this browser.</p>
+        </div>
+      </aside>
+
+      <main class="work-area" id="main">
+        <section class="empty-project-state" id="empty-project-state" hidden aria-labelledby="empty-project-title">
+          <h1 id="empty-project-title">A fresh start.</h1>
+          <p>Your saved projects are gone. Create one to paste a pattern or build rounds by hand.</p>
+          <button class="button button-primary" id="empty-create-project" type="button">Create a project</button>
+        </section>
+        <div class="workspace-heading">
+          <div>
+            <div class="breadcrumb"><span id="project-crumb">Tiny tulip</span><span aria-hidden="true">/</span><span id="round-crumb">Round 3</span></div>
+            <h1 id="project-title">Tiny tulip</h1>
+            <p class="project-description" id="project-description">A little bloom, worked from the centre out.</p>
+          </div>
+          <button class="button button-outline" id="rename-project" type="button">Project details</button>
+        </div>
+
+        <div class="work-grid">
+          <section class="stitch-work" aria-labelledby="round-title">
+            <div class="round-topline">
+              <div>
+                <p class="round-index" id="round-index">Round 03 <span>of 05</span></p>
+                <h2 id="round-title">Build the petals</h2>
+                <p class="round-instruction" id="round-instruction">Two single crochets, then increase six times.</p>
+              </div>
+              <div class="round-controls">
+                <button class="icon-button round-nav-button" id="previous-round" type="button" aria-label="Previous round" title="Previous round">Previous</button>
+                <button class="icon-button round-nav-button" id="next-round" type="button" aria-label="Next round" title="Next round">Next</button>
+              </div>
+            </div>
+
+            <div class="progress-band">
+              <div class="progress-copy"><strong id="progress-count">0 / 24</strong><span id="progress-caption">output stitches complete</span></div>
+              <div class="progress-track" role="progressbar" id="progress-bar" aria-label="Round progress" aria-valuemin="0" aria-valuemax="24" aria-valuenow="0"><span id="progress-fill"></span></div>
+              <button class="text-button" id="undo-progress" type="button" disabled>Undo</button>
+            </div>
+
+            <div class="next-up" id="next-up">
+              <div class="next-up-label">Up next</div>
+              <div class="next-up-main"><span class="next-up-number" id="next-up-number">Stitch 1</span><strong id="next-up-operation">Single crochet</strong><span id="next-up-detail">Work into the next stitch</span></div>
+              <button class="button button-primary" id="complete-next" type="button">Mark complete <span aria-hidden="true">↵</span></button>
+            </div>
+
+            <div class="sequence-heading">
+              <div><h3>Round sequence</h3><p id="sequence-hint">Grouped instructions with stitch-level controls</p></div>
+              <div class="view-toggle" role="group" aria-label="Sequence display">
+                <button type="button" data-view="grouped" aria-pressed="false">Groups</button>
+                <button type="button" data-view="individual" aria-pressed="false">Stitches</button>
+                <button type="button" data-view="both" aria-pressed="true">Both</button>
+              </div>
+            </div>
+            <div class="sequence-grid" id="sequence-grid" aria-live="polite"></div>
+
+            <div class="round-footer">
+              <span id="round-count-summary">18 operations · 24 stitches</span>
+              <div class="progress-toggle" role="group" aria-label="Progress mode">
+                <span>Mark by</span>
+                <button type="button" data-progress="operation" aria-pressed="false">Operation</button>
+                <button type="button" data-progress="output" aria-pressed="true">Stitch</button>
+              </div>
+            </div>
+          </section>
+
+          <aside class="pattern-aside" aria-label="Pattern overview">
+            <div class="aside-head"><h2>This pattern</h2><button class="text-button" id="edit-pattern-inline" type="button">Edit</button></div>
+            <ol class="round-list" id="round-list"></ol>
+            <div class="aside-note" id="parse-note" hidden></div>
+            <div class="aside-help"><span class="help-mark">i</span><p>An increase works two stitches into one base stitch. The group stays together as you work.</p></div>
+          </aside>
+        </div>
+
+        <footer class="workspace-footer"><span>Loopwork <span class="footer-dot">·</span> Pattern companion</span><span><kbd>Space</kbd> mark next <span class="footer-dot">·</span> <kbd>⌘</kbd>/<kbd>Ctrl</kbd> <kbd>Z</kbd> undo</span></footer>
+      </main>
+    </div>
+
+    <dialog class="pattern-dialog" id="pattern-dialog" aria-labelledby="dialog-title">
+      <form method="dialog" class="dialog-chrome"><button class="icon-button" value="cancel" aria-label="Close dialog">×</button></form>
+      <div class="dialog-content">
+        <div class="dialog-heading"><h2 id="dialog-title">Your pattern</h2><p>Paste written rounds or build them one at a time. Review the interpretation before it becomes your guide.</p></div>
+        <div class="mode-tabs" role="tablist" aria-label="Pattern input method">
+          <button type="button" role="tab" aria-selected="true" data-input-mode="paste">Paste pattern</button>
+          <button type="button" role="tab" aria-selected="false" data-input-mode="manual">Build rounds</button>
+        </div>
+        <div class="project-fields">
+          <label>Project name<input id="pattern-name" name="projectName" autocomplete="off" /></label>
+          <label>Short note <span class="optional">optional</span><input id="pattern-description" name="description" autocomplete="off" /></label>
+        </div>
+        <section id="paste-panel" class="input-panel" role="tabpanel">
+          <label for="pattern-source">Pattern instructions</label>
+          <p class="field-help">Use a round or row per line. Common forms like “(1 SC, INC) × 6” are expanded automatically.</p>
+          <textarea id="pattern-source" rows="9" spellcheck="false"></textarea>
+        </section>
+        <section id="manual-panel" class="input-panel" role="tabpanel" hidden>
+          <div class="manual-entry-row">
+            <label>Round or row<input id="manual-label" value="Round 1" /></label>
+            <label>Instructions<input id="manual-instruction" placeholder="6 SC in MR" /></label>
+            <button class="button button-outline" id="add-manual-round" type="button">Add round</button>
+          </div>
+          <ol class="manual-rounds" id="manual-rounds"></ol>
+          <p class="field-help">Add basic instructions such as “6 SC”, “(1 SC, INC) × 6”, or “12 DC”. You can edit the text before saving.</p>
+        </section>
+        <div class="parse-review" id="parse-review" aria-live="polite"></div>
+        <div class="dialog-actions"><button class="button button-quiet" id="cancel-edit" type="button">Cancel</button><button class="button button-primary" id="save-pattern" type="button">Review and save</button></div>
+      </div>
+    </dialog>
+    <dialog class="delete-dialog" id="delete-project-dialog" aria-labelledby="delete-dialog-title">
+      <div class="delete-dialog-content">
+        <h2 id="delete-dialog-title">Delete this project?</h2>
+        <p id="delete-dialog-message">The pattern and saved progress will be removed from this browser.</p>
+        <div class="dialog-actions">
+          <button class="button button-quiet" id="cancel-delete-project" type="button">Keep project</button>
+          <button class="button button-primary" id="confirm-delete-project" type="button">Delete project</button>
+        </div>
+      </div>
+    </dialog>
+    <div class="sr-status" id="sr-status" role="status" aria-live="polite"></div>
+  </body>
+</html>
