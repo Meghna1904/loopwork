@@ -1,3 +1,4 @@
+import { parsePattern as parsePatternSource, parseRoundDraft, STITCHES } from "./lib/parser/index.js";
 const STORAGE_KEY = "loopwork-projects-v1";
 const THEME_KEY = "loopwork-theme-v1";
 const API_URL = "/api/projects";
@@ -8,177 +9,55 @@ Round 3: (2 SC, INC) × 6
 Round 4: (3 SC, INC) × 6
 Round 5: 30 SC`;
 
-const stitchNames = {
-  SC: "Single crochet", HDC: "Half double crochet", DC: "Double crochet", TR: "Treble crochet",
-  INC: "Increase", DEC: "Decrease", CH: "Chain", SLST: "Slip stitch", MR: "Magic ring",
-  SKIP: "Skip a stitch", SHELL: "Shell", PUFF: "Puff stitch", BOBBLE: "Bobble"
-};
+const stitchNames = Object.fromEntries(Object.values(STITCHES).map((stitch) => [stitch.type, stitch.label]));
 
 function makeId() { return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 
-function makeRound(label, instruction, options = {}) {
-  const parsed = parseInstruction(instruction, options.startOutput || 1);
+function materializeOperation(operation) {
   return {
-    id: makeId(), label, title: options.title || label, originalText: instruction,
-    operations: parsed.operations, expectedInput: parsed.inputCount,
-    expectedOutput: parsed.outputCount, expectedStitches: parsed.declaredCount,
-    warning: parsed.warning || "", complete: false
+    id: makeId(),
+    type: operation.type,
+    label: operation.label,
+    inputCount: operation.inputCount,
+    outputCount: operation.outputCount,
+    inputStart: operation.inputStart,
+    done: false,
+    outputs: Array.from({ length: operation.outputCount }, (_, index) => ({
+      id: makeId(),
+      number: operation.outputStart + index,
+      done: false
+    }))
   };
 }
 
-function parseColumnarTable(sourceLines) {
-  const cells = sourceLines.map((line) => line
-    .replace(/&#x20;|&nbsp;/gi, " ")
-    .replace(/\u00a0/g, " ")
-    .replace(/^\s*\|+|\|+\s*$/g, "")
-    .trim())
-    .filter((cell) => cell && !/^:?-{1,}:?$/.test(cell));
-  const headerIndex = cells.findIndex((cell, index) =>
-    /^round$/i.test(cell) && /^instructions?$/i.test(cells[index + 1] || "") && /^total\s+stitches$/i.test(cells[index + 2] || ""));
-  if (headerIndex < 0) return null;
-
-  const rounds = [];
-  const warnings = [];
-  const data = cells.slice(headerIndex + 3);
-  for (let index = 0; index + 2 < data.length; index += 3) {
-    const roundMatch = data[index].match(/^(?:round\s*)?(\d+)$/i);
-    const totalMatch = data[index + 2].match(/^(\d+)$/);
-    const instruction = data[index + 1].trim();
-    if (!roundMatch || !totalMatch || !instruction) {
-      warnings.push(`Couldn’t read table cells near “${data[index]}”. Keep each round, instruction, and total in its own cell.`);
-      continue;
-    }
-    const total = Number(totalMatch[1]);
-    const round = makeRound(`Round ${roundMatch[1]}`, instruction);
-    round.expectedStitches = total;
-    if (round.expectedOutput !== total) round.warning = `Table total is ${total}; the instructions produce ${round.expectedOutput}.`;
-    if (round.warning) warnings.push(`${round.label}: ${round.warning}`);
-    rounds.push(round);
-  }
-  if (!rounds.length) warnings.push("No round rows were found after the table header.");
-  return { rounds, warnings };
+function materializeRound(draft) {
+  return {
+    id: makeId(),
+    label: draft.label,
+    title: draft.title || draft.label,
+    originalText: draft.instruction,
+    operations: draft.operations.map(materializeOperation),
+    expectedInput: draft.inputCount,
+    expectedOutput: draft.outputCount,
+    expectedStitches: draft.declaredTotal,
+    workings: draft.workings || "",
+    issues: draft.issues || [],
+    status: draft.status,
+    warning: draft.warning || "",
+    complete: false
+  };
 }
 
+function makeRound(label, instruction, options = {}) {
+  const draft = parseRoundDraft(label, instruction, { outputStart: options.startOutput || 1 });
+  return { ...materializeRound(draft), title: options.title || label };
+}
+
+// The pattern engine owns all reading and counting; the app only adds ids and
+// progress state on top of what it returns.
 function parsePattern(text) {
-  const rounds = [];
-  const warnings = [];
-  const sourceLines = text.split(/\r?\n/);
-  const columnar = parseColumnarTable(sourceLines);
-  if (columnar) return columnar;
-  const lines = sourceLines.map((line) => line.replace(/\u00a0/g, " ").trim()).filter(Boolean);
-  const headerIndex = lines.findIndex((line) => /round/i.test(line) && /instructions?/i.test(line) && /total/i.test(line));
-  const tableMode = headerIndex >= 0 || lines.some((line) => line.includes("|"));
-  const dataLines = headerIndex >= 0 ? lines.slice(headerIndex + 1) : lines;
-  let fallback = 1;
-  for (const line of dataLines) {
-    if (/^\|?\s*:?-{2,}/.test(line) || /^\|?[\s|:-]+\|?$/.test(line)) continue;
-    let tableCells = null;
-    if (tableMode && line.includes("|")) {
-      tableCells = line.replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim()).filter(Boolean);
-    }
-    if (tableCells?.length >= 3) {
-      const roundNumber = tableCells[0].match(/\d+/)?.[0];
-      const instruction = tableCells[1];
-      const total = Number(tableCells[2].match(/\d+/)?.[0]);
-      if (!roundNumber || !instruction || !Number.isFinite(total)) continue;
-      const round = makeRound(`Round ${roundNumber}`, instruction);
-      round.expectedStitches = total;
-      if (round.expectedOutput !== total) round.warning = `Table total is ${total}; the instructions produce ${round.expectedOutput}.`;
-      rounds.push(round);
-      fallback += 1;
-      continue;
-    }
-    if (tableMode) {
-      const row = line.match(/^\|?\s*(?:round\s*)?(\d+)\s+(.+?)\s+(\d+)\s*\|?$/i);
-      if (row) {
-        const round = makeRound(`Round ${row[1]}`, row[2]);
-        round.expectedStitches = Number(row[3]);
-        if (round.expectedOutput !== round.expectedStitches) round.warning = `Table total is ${round.expectedStitches}; the instructions produce ${round.expectedOutput}.`;
-        rounds.push(round);
-        fallback += 1;
-        continue;
-      }
-    }
-    const match = line.match(/^(?:(round|rnd|row|r)\s*#?\s*(\d+)|([\w -]{1,24})\s*:)\s*[:.]?\s*(.*)$/i);
-    let label;
-    let instruction;
-    if (match) {
-      label = match[1] ? `${/row/i.test(match[1]) ? "Row" : "Round"} ${match[2]}` : (match[3] || `Round ${fallback}`).trim();
-      instruction = match[4].trim();
-    } else {
-      label = `Round ${fallback}`;
-      instruction = line;
-    }
-    const round = makeRound(label, instruction);
-    if (round.warning) warnings.push(`${label}: ${round.warning}`);
-    rounds.push(round);
-    fallback += 1;
-  }
-  if (!rounds.length) warnings.push("Add at least one round or row of instructions.");
-  return { rounds, warnings };
-}
-
-function expandRepeats(source) {
-  let text = source.replace(/[×✕]/g, "x").replace(/\b(repeat(?:ed)?\s+(\d+)\s+times?)\b/gi, "x$2");
-  const stitchToken = "(?:BLO\\s+SC|FLO\\s+SC|SL\\s*ST|SC|HDC|DC|TR|INC|DEC|CH|MR|SKIP|SHELL|PUFF|BOBBLE)";
-  text = text.replace(new RegExp(`(${stitchToken})\\s*x\\s*(\\d+)`, "gi"), (_, instruction, count) => Array(Number(count)).fill(instruction).join(", "));
-  for (let pass = 0; pass < 12; pass += 1) {
-    const before = text;
-    text = text.replace(/\(([^()]+)\)\s*x\s*(\d+)/gi, (_, group, count) => Array(Number(count)).fill(group).join(", "));
-    text = text.replace(/\*([^*]+)\*\s*x\s*(\d+)/gi, (_, group, count) => Array(Number(count)).fill(group).join(", "));
-    if (text === before) break;
-  }
-  return text.replace(/\*/g, "").replace(/[()]/g, " ");
-}
-
-function parseInstruction(source, outputStart = 1) {
-  const declaredMatch = source.match(/\((\d+)(?:\s*(?:sts?|stitches?))?\)\s*$/i) || source.match(/\b(?:=|total\s+of)\s*(\d+)\s*$/i);
-  const declaredCount = declaredMatch ? Number(declaredMatch[1]) : null;
-  let text = expandRepeats(declaredMatch ? source.slice(0, declaredMatch.index) : source)
-    .replace(/\b(in|into)\s+(?:the\s+)?(?:magic\s+ring|magic\s+circle|mr|next\s+stitch|next\s+space|chain\s+space)\b/gi, " ")
-    .replace(/\b(?:work|repeat|each|stitches?|sts?)\b/gi, " ")
-    .replace(/\b(?:total\s+of|there\s+are)\b/gi, " ")
-    .replace(/\band\b/gi, ",");
-  const stitchToken = "(?:BLO\\s+SC|FLO\\s+SC|SL\\s*ST|SC|HDC|DC|TR|INC|DEC|CH|MR|SKIP|SHELL|PUFF|BOBBLE)";
-  text = text.replace(new RegExp(`(${stitchToken})(\\s+(?:in\\s+(?:the\\s+)?)?same\\s+(?:stitch|space))?\\s+(?=(?:\\d+\\s*)?${stitchToken}\\b)`, "gi"), "$1$2, ");
-  const bits = text.split(/[,;\n]+/).map((part) => part.trim()).filter(Boolean);
-  const operations = [];
-  const problems = [];
-  let inputPosition = 1;
-  let outputPosition = outputStart;
-
-  for (const bit of bits) {
-    if (/^\d+\s*(?:st|nd|rd|th)?\s*$/i.test(bit) || /^\d+$/.test(bit)) continue;
-    const sameTarget = /\bin\s+(?:the\s+)?same\s+(?:stitch|space)\b/i.test(bit);
-    const normalized = bit.replace(/\b(?:in|into)\s+(?:the\s+)?same\s+(?:stitch|space)\b/gi, " ").trim();
-    const pattern = /^(?:(\d+)\s*)?(BLO\s+SC|FLO\s+SC|SL\s*ST|SC|HDC|DC|TR|INC|DEC|CH|MR|SKIP|SHELL|PUFF|BOBBLE)\b(?:\s+(?:in\s+)?(?:next\s+)?(?:stitch|space|chain\s+space))?$/i;
-    const match = normalized.match(pattern);
-    if (!match) {
-      problems.push(bit);
-      continue;
-    }
-    const count = Math.min(Number(match[1] || 1), 80);
-    const rawType = match[2].toUpperCase().replace(/\s+/g, "");
-    if (sameTarget && count > 1 && ["SC", "HDC", "DC", "TR"].includes(rawType)) {
-      const type = "INC";
-      const outputs = Array.from({ length: count }, (_, i) => ({ id: makeId(), number: outputPosition + i, done: false }));
-      operations.push({ id: makeId(), type, label: `${count} ${rawType} in one stitch`, inputCount: 1, outputCount: count, inputStart: inputPosition, outputs, done: false });
-      inputPosition += 1; outputPosition += count;
-      continue;
-    }
-    for (let i = 0; i < count; i += 1) {
-      const type = rawType === "SLST" ? "SLST" : rawType;
-      const inputCount = type === "INC" ? 1 : type === "DEC" ? 2 : type === "CH" || type === "MR" ? 0 : 1;
-      const outputCount = type === "INC" ? 2 : type === "DEC" ? 1 : type === "SKIP" || type === "MR" ? 0 : 1;
-      const outputs = Array.from({ length: outputCount }, (_, j) => ({ id: makeId(), number: outputPosition + j, done: false }));
-      operations.push({ id: makeId(), type, label: type === "BLOSC" ? "BLO SC" : type === "FLOSC" ? "FLO SC" : type, inputCount, outputCount, inputStart: inputPosition, outputs, done: false });
-      inputPosition += inputCount;
-      outputPosition += outputCount;
-    }
-  }
-  const outputCount = outputPosition - outputStart;
-  const warning = problems.length ? `Couldn't interpret: ${problems.slice(0, 3).join("; ")}${problems.length > 3 ? "…" : ""}` : "";
-  return { operations, inputCount: inputPosition - 1, outputCount, declaredCount, warning };
+  const parsed = parsePatternSource(text);
+  return { rounds: (parsed.rounds || []).map(materializeRound), warnings: parsed.warnings || [] };
 }
 
 function seedProjects() {
@@ -197,14 +76,39 @@ function seedProjects() {
 
 function repairProjectPattern(project) {
   if (!project?.originalPattern || !Array.isArray(project.rounds) || !project.rounds.length) return project;
-  const hasUsableSequence = project.rounds.some((round) => round.operations?.some((operation) => operation.outputs?.length));
-  if (hasUsableSequence) return project;
+
+  const parsed = parsePattern(project.originalPattern);
+  if (!parsed.rounds.length) return project;
+
+  // A stored round is stale when re-reading the original text disagrees with
+  // it. That catches rounds expanded by an older, less accurate reading.
+  const stale = project.rounds.length !== parsed.rounds.length || project.rounds.some((round, index) => {
+    const fresh = parsed.rounds[index];
+    if (!fresh) return true;
+    return round.label !== fresh.label
+      || round.expectedOutput !== fresh.expectedOutput
+      || (round.operations?.length ?? 0) !== fresh.operations.length;
+  });
+  if (!stale) return project;
 
   const previousRound = project.rounds.find((round) => round.id === project.currentRoundId);
-  const parsed = parsePattern(project.originalPattern);
-  if (!parsed.rounds.some((round) => round.operations.some((operation) => operation.outputs.length))) return project;
+  const previousByLabel = new Map(project.rounds.map((round) => [round.label, round]));
+  if (!parsed.rounds.some((round) => round.operations.length)) return project;
 
-  project.rounds = parsed.rounds;
+  // Keep ticks where the regenerated round has the same shape.
+  project.rounds = parsed.rounds.map((fresh, index) => {
+    const old = project.rounds[index]?.label === fresh.label ? project.rounds[index] : previousByLabel.get(fresh.label);
+    if (!old || (old.operations?.length ?? 0) !== fresh.operations.length) return fresh;
+    fresh.operations.forEach((operation, operationIndex) => {
+      const oldOperation = old.operations[operationIndex];
+      if (!oldOperation) return;
+      operation.done = Boolean(oldOperation.done);
+      operation.outputs.forEach((output, outputIndex) => {
+        output.done = Boolean(oldOperation.outputs?.[outputIndex]?.done);
+      });
+    });
+    return fresh;
+  });
   project.currentRoundId = project.rounds.find((round) => round.label === previousRound?.label)?.id || project.rounds[0].id;
   project.patternRepaired = true;
   return project;
@@ -666,7 +570,16 @@ function reviewPattern() {
 
 function renderPendingReview() {
   if (!pendingImport) return;
-  const rows = pendingImport.rounds.map((round, index) => `<div class="review-row"><strong>${escapeHtml(round.label)}</strong><span>${escapeHtml(round.originalText)}</span><span>${round.operations.length} operations · ${round.expectedOutput} out${round.expectedStitches != null ? ` · total ${round.expectedStitches}` : ""}</span><button type="button" data-delete-review-round="${index}" aria-label="Delete ${escapeHtml(round.label)}">Delete</button></div>`).join("");
+  const rows = pendingImport.rounds.map((round, index) => {
+    // Review has to show what the line was read as, and say plainly when the
+    // written total and the arithmetic disagree, so it can be checked at a glance.
+    const detail = round.warning
+      ? `<span class="review-change is-check">${escapeHtml(round.warning)}</span>`
+      : round.workings
+        ? `<span class="review-change">${escapeHtml(round.workings)}</span>`
+        : "";
+    return `<div class="review-row"><strong>${escapeHtml(round.label)}</strong><span>${escapeHtml(round.originalText)}${detail}</span><span>${round.operations.length} operations · ${round.expectedOutput} out${round.expectedStitches != null ? ` · total ${round.expectedStitches}` : ""}</span><button type="button" data-delete-review-round="${index}" aria-label="Delete ${escapeHtml(round.label)}">Delete</button></div>`;
+  }).join("");
   const warningMarkup = pendingImport.warnings.length ? `<div class="review-warning">${pendingImport.warnings.map(escapeHtml).join(" ")}</div>` : '<div class="review-warning">The pattern is ready to use. Check the expanded instructions before starting.</div>';
   const emptyMarkup = pendingImport.rounds.length ? "" : '<p class="review-warning">No rounds remain. Add or paste at least one round to save this pattern.</p>';
   $("#parse-review").innerHTML = `${rows}${emptyMarkup}${warningMarkup}`;

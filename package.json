@@ -6,7 +6,8 @@
   "scripts": {
     "build": "node scripts/build.js",
     "dev": "node server.js",
-    "db:push": "node scripts/migrate.js"
+    "db:push": "node scripts/migrate.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.2.0"
