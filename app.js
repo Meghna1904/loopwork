@@ -1,6 +1,7 @@
 const STORAGE_KEY = "loopwork-projects-v1";
 const THEME_KEY = "loopwork-theme-v1";
 const API_URL = "/api/projects";
+const DIRTY_KEY = "loopwork-unsynced-v1";
 const SAMPLE_PATTERN = `Round 1: 6 SC in MR
 Round 2: (1 SC, INC) × 6
 Round 3: (2 SC, INC) × 6
@@ -243,7 +244,10 @@ let pendingImport = null;
 let pendingDeleteProjectId = null;
 let serverReady = false;
 let restoring = false;
+let booted = false;
 let saveTimer = null;
+let saveAttempts = 0;
+let retryTimer = null;
 let saveChain = Promise.resolve();
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -273,13 +277,26 @@ const projectProgress = (project) => {
   return all.length ? Math.round(all.filter((output) => output.done).length / all.length * 100) : 0;
 };
 
+function markDirty() {
+  try { localStorage.setItem(DIRTY_KEY, "1"); } catch { /* nothing to record */ }
+}
+
+function clearDirty() {
+  try { localStorage.removeItem(DIRTY_KEY); } catch { /* nothing to clear */ }
+}
+
+function hasUnsyncedChanges() {
+  try { return localStorage.getItem(DIRTY_KEY) === "1"; } catch { return false; }
+}
+
 function persist() {
   if (restoring) return;
   const project = activeProject();
   if (project) project.updatedAt = new Date().toISOString();
   cacheProjects();
+  if (booted) markDirty();
   if (!serverReady) {
-    setSaveState("Saved on this device");
+    setSaveState("Not saving to Neon — kept in this browser");
     return;
   }
   setSaveState("Saving…");
@@ -287,34 +304,60 @@ function persist() {
   saveTimer = window.setTimeout(saveToServer, 400);
 }
 
+function sendProjects(keepalive = false) {
+  return fetch(API_URL, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ projects }),
+    keepalive
+  });
+}
+
 function saveToServer() {
   saveTimer = null;
-  const body = JSON.stringify({ projects });
   saveChain = saveChain.then(async () => {
     try {
-      const response = await fetch(API_URL, { method: "PUT", headers: { "Content-Type": "application/json" }, body });
-      if (!response.ok) throw new Error(`status ${response.status}`);
+      const response = await sendProjects();
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
+      saveAttempts = 0;
+      window.clearTimeout(retryTimer);
+      clearDirty();
       setSaveState("Saved to Neon");
-    } catch {
-      setSaveState("Saved on this device");
+    } catch (error) {
+      markDirty();
+      saveAttempts += 1;
+      setSaveState(`Not saving to Neon (${error.message}) — kept in this browser`);
+      if (saveAttempts < 5) {
+        window.clearTimeout(retryTimer);
+        retryTimer = window.setTimeout(saveToServer, Math.min(2000 * saveAttempts, 10000));
+      }
     }
   });
   return saveChain;
 }
 
 async function syncFromServer() {
-  let payload;
-  try {
-    const response = await fetch(API_URL, { headers: { Accept: "application/json" }, cache: "no-store" });
-    if (!response.ok) throw new Error(`status ${response.status}`);
-    payload = await response.json();
-  } catch {
+  const bootIds = projects.map((project) => project.id).join("|");
+  let payload = null;
+  let failure = "unreachable";
+  for (let attempt = 0; attempt < 3 && !payload; attempt += 1) {
+    try {
+      const response = await fetch(API_URL, { headers: { Accept: "application/json" }, cache: "no-store" });
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
+      payload = await response.json();
+    } catch (error) {
+      failure = error.message;
+      if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 700));
+    }
+  }
+  if (!payload) {
     serverReady = false;
-    setSaveState("Saved on this device");
+    setSaveState(`Not saving to Neon (${failure}) — kept in this browser`);
     return;
   }
   serverReady = true;
-  if (payload?.initialized && Array.isArray(payload.projects)) {
+  const editedWhileLoading = hasUnsyncedChanges() || projects.map((project) => project.id).join("|") !== bootIds;
+  if (payload.initialized && Array.isArray(payload.projects) && !editedWhileLoading) {
     restoring = true;
     try {
       projects = payload.projects.map(repairProjectPattern);
@@ -324,10 +367,11 @@ async function syncFromServer() {
     } finally {
       restoring = false;
     }
+    clearDirty();
     setSaveState("Saved to Neon");
     return;
   }
-  // First use of this database: upload whatever this device already has.
+  // This device holds newer work, or the database is new: send local work up.
   persist();
 }
 
@@ -707,4 +751,19 @@ document.addEventListener("keydown", (event) => {
 
 applyTheme(document.documentElement.dataset.theme || "light");
 render();
+booted = true;
 syncFromServer();
+
+// Never lose the newest change when the tab is closed or reloaded.
+window.addEventListener("pagehide", () => {
+  if (!serverReady || !hasUnsyncedChanges()) return;
+  window.clearTimeout(saveTimer);
+  sendProjects(true).catch(() => { /* the next load retries from the browser copy */ });
+});
+
+// Catch up after sleeping, or after the database comes back.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  if (!serverReady) { syncFromServer(); return; }
+  if (hasUnsyncedChanges()) saveToServer();
+});

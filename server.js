@@ -33,7 +33,11 @@ createServer(async (request, response) => {
   }
   try {
     const data = await readFile(filePath);
-    response.writeHead(200, { "Content-Type": contentTypes[extname(filePath)] || "application/octet-stream" });
+    response.writeHead(200, {
+      "Content-Type": contentTypes[extname(filePath)] || "application/octet-stream",
+      // Local development must never serve a stale app.js after an edit.
+      "Cache-Control": "no-cache"
+    });
     response.end(data);
   } catch {
     response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
