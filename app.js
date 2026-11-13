@@ -260,23 +260,21 @@ async function syncFromServer() {
     return;
   }
   serverReady = true;
-  const editedWhileLoading = hasUnsyncedChanges() || projects.map((project) => project.id).join("|") !== bootIds;
-  if (payload.initialized && Array.isArray(payload.projects) && !editedWhileLoading) {
-    restoring = true;
-    try {
-      projects = payload.projects.map(repairProjectPattern);
-      if (!projects.some((project) => project.id === activeProjectId)) activeProjectId = projects[0]?.id || null;
-      undoStack = [];
-      render();
-    } finally {
-      restoring = false;
-    }
-    clearDirty();
-    setSaveState("Saved to Neon");
-    return;
+  // Always restore from the server so progress is consistent across devices.
+  // The DIRTY_KEY mechanism still protects against losing work within a single
+  // device (the 400ms save debounce + pagehide retry); cross-device sync uses
+  // the server as the single source of truth.
+  restoring = true;
+  try {
+    projects = payload.projects.map(repairProjectPattern);
+    if (!projects.some((project) => project.id === activeProjectId)) activeProjectId = projects[0]?.id || null;
+    undoStack = [];
+    render();
+  } finally {
+    restoring = false;
   }
-  // This device holds newer work, or the database is new: send local work up.
-  persist();
+  clearDirty();
+  setSaveState("Saved to Neon");
 }
 
 function formatLabel(label) { return label.replace(/^r(\d+)$/i, "Round $1").replace(/^rnd\s/i, "Round "); }
