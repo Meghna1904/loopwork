@@ -1,5 +1,6 @@
 const STORAGE_KEY = "loopwork-projects-v1";
 const THEME_KEY = "loopwork-theme-v1";
+const API_URL = "/api/projects";
 const SAMPLE_PATTERN = `Round 1: 6 SC in MR
 Round 2: (1 SC, INC) × 6
 Round 3: (2 SC, INC) × 6
@@ -208,12 +209,27 @@ function repairProjectPattern(project) {
   return project;
 }
 
-function loadProjects() {
+function cacheProjects() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+  } catch { /* keep working from memory when browser storage is unavailable */ }
+}
+
+function readCachedProjects() {
   try {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
     if (Array.isArray(stored)) return stored.map(repairProjectPattern);
   } catch { /* start from the sample project */ }
-  return seedProjects();
+  return null;
+}
+
+function loadProjects() {
+  return readCachedProjects() ?? seedProjects();
+}
+
+function setSaveState(message) {
+  const state = $("#save-state");
+  if (state) state.textContent = message;
 }
 
 let projects = loadProjects();
@@ -225,6 +241,10 @@ let inputMode = "paste";
 let manualRounds = [];
 let pendingImport = null;
 let pendingDeleteProjectId = null;
+let serverReady = false;
+let restoring = false;
+let saveTimer = null;
+let saveChain = Promise.resolve();
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -254,11 +274,61 @@ const projectProgress = (project) => {
 };
 
 function persist() {
+  if (restoring) return;
   const project = activeProject();
   if (project) project.updatedAt = new Date().toISOString();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
-  const state = $("#save-state");
-  if (state) state.textContent = "Saved on this device";
+  cacheProjects();
+  if (!serverReady) {
+    setSaveState("Saved on this device");
+    return;
+  }
+  setSaveState("Saving…");
+  window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(saveToServer, 400);
+}
+
+function saveToServer() {
+  saveTimer = null;
+  const body = JSON.stringify({ projects });
+  saveChain = saveChain.then(async () => {
+    try {
+      const response = await fetch(API_URL, { method: "PUT", headers: { "Content-Type": "application/json" }, body });
+      if (!response.ok) throw new Error(`status ${response.status}`);
+      setSaveState("Saved to Neon");
+    } catch {
+      setSaveState("Saved on this device");
+    }
+  });
+  return saveChain;
+}
+
+async function syncFromServer() {
+  let payload;
+  try {
+    const response = await fetch(API_URL, { headers: { Accept: "application/json" }, cache: "no-store" });
+    if (!response.ok) throw new Error(`status ${response.status}`);
+    payload = await response.json();
+  } catch {
+    serverReady = false;
+    setSaveState("Saved on this device");
+    return;
+  }
+  serverReady = true;
+  if (payload?.initialized && Array.isArray(payload.projects)) {
+    restoring = true;
+    try {
+      projects = payload.projects.map(repairProjectPattern);
+      if (!projects.some((project) => project.id === activeProjectId)) activeProjectId = projects[0]?.id || null;
+      undoStack = [];
+      render();
+    } finally {
+      restoring = false;
+    }
+    setSaveState("Saved to Neon");
+    return;
+  }
+  // First use of this database: upload whatever this device already has.
+  persist();
 }
 
 function formatLabel(label) { return label.replace(/^r(\d+)$/i, "Round $1").replace(/^rnd\s/i, "Round "); }
@@ -287,7 +357,7 @@ function openDeleteProject(projectId) {
   if (!project) return;
   pendingDeleteProjectId = projectId;
   $("#delete-dialog-title").textContent = `Delete “${project.name}”?`;
-  $("#delete-dialog-message").textContent = "The pattern and saved progress will be removed from this browser.";
+  $("#delete-dialog-message").textContent = "The pattern and saved progress will be removed for good.";
   $("#delete-project-dialog").showModal();
   $("#cancel-delete-project").focus();
 }
@@ -637,3 +707,4 @@ document.addEventListener("keydown", (event) => {
 
 applyTheme(document.documentElement.dataset.theme || "light");
 render();
+syncFromServer();

@@ -2,6 +2,11 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadEnv } from "./lib/env.js";
+import { isConfigured } from "./lib/db.js";
+import { handleProjectsRequest } from "./lib/projects-api.js";
+
+await loadEnv();
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const port = Number(process.env.PORT || 4173);
@@ -14,6 +19,12 @@ const contentTypes = {
 
 createServer(async (request, response) => {
   const pathname = decodeURIComponent(new URL(request.url || "/", "http://localhost").pathname);
+
+  if (pathname === "/api/projects") {
+    await handleProjectsRequest(request, response);
+    return;
+  }
+
   const relative = normalize(pathname === "/" ? "index.html" : pathname.slice(1));
   const filePath = join(root, relative);
   if (!filePath.startsWith(root)) {
@@ -30,4 +41,7 @@ createServer(async (request, response) => {
   }
 }).listen(port, "127.0.0.1", () => {
   process.stdout.write(`Loopwork is running at http://127.0.0.1:${port}\n`);
+  if (!isConfigured()) {
+    process.stdout.write("DATABASE_URL is not set, so projects stay in this browser only.\n");
+  }
 });
