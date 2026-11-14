@@ -19,10 +19,24 @@
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to work area</a>
+    <section class="login-screen" id="login-screen" hidden aria-labelledby="login-title">
+      <form class="login-card" id="login-form" novalidate>
+        <p class="login-wordmark">Loopwork<span>.</span></p>
+        <h1 id="login-title">Your projects, on every device.</h1>
+        <p class="login-intro">Enter your name and your code. The same code opens the same projects wherever you sign in.</p>
+        <label class="login-field">Name<input id="login-name" name="name" autocomplete="name" maxlength="40" required /></label>
+        <label class="login-field">Code<input id="login-code" name="code" autocomplete="off" spellcheck="false" autocapitalize="characters" maxlength="32" placeholder="e.g. DAISY-42" required /></label>
+        <p class="login-error" id="login-error" role="alert" hidden></p>
+        <button class="button button-primary login-submit" id="login-submit" type="submit">Open my projects</button>
+        <p class="login-hint">A code you have not used before starts a fresh set of projects.</p>
+      </form>
+    </section>
     <header class="topbar">
       <a class="wordmark" href="#" aria-label="Loopwork home">Loopwork<span>.</span></a>
       <div class="topbar-center">A calmer way to follow a pattern</div>
       <div class="topbar-actions">
+        <span class="account-name" id="account-name" hidden></span>
+        <button class="button button-quiet account-button" id="account-button" type="button" hidden>Sign out</button>
         <span class="save-state" id="save-state" role="status">Saved on this device</span>
         <button class="button button-quiet theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Dark mode</button>
         <button class="button button-quiet" id="open-patterns" type="button">Edit pattern</button>

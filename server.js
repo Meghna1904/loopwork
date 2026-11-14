@@ -4,7 +4,7 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadEnv } from "./lib/env.js";
 import { isConfigured } from "./lib/db.js";
-import { handleProjectsRequest } from "./lib/projects-api.js";
+import { handleProjectsRequest, handleSessionRequest } from "./lib/projects-api.js";
 
 await loadEnv();
 
@@ -22,6 +22,11 @@ createServer(async (request, response) => {
 
   if (pathname === "/api/projects") {
     await handleProjectsRequest(request, response);
+    return;
+  }
+
+  if (pathname === "/api/session") {
+    await handleSessionRequest(request, response);
     return;
   }
 

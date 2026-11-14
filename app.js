@@ -2,6 +2,8 @@ import { parseDocument, documentRounds, parseRoundDraft, STITCHES } from "./lib/
 const STORAGE_KEY = "loopwork-projects-v1";
 const THEME_KEY = "loopwork-theme-v1";
 const API_URL = "/api/projects";
+const SESSION_URL = "/api/session";
+const SESSION_KEY = "loopwork-session-v1";
 const DIRTY_KEY = "loopwork-unsynced-v1";
 const SAMPLE_PATTERN = `Round 1: 6 SC in MR
 Round 2: (1 SC, INC) × 6
@@ -146,6 +148,28 @@ function setSaveState(message) {
   if (state) state.textContent = message;
 }
 
+// The code is the whole account: no password, no email, nothing to verify. It
+// has to travel with every request so the server can tell whose projects these
+// are, and it is kept only in this browser.
+function readSession() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SESSION_KEY));
+    if (stored && typeof stored.name === "string" && typeof stored.code === "string" && stored.code) {
+      return { name: stored.name, code: stored.code };
+    }
+  } catch { /* sign in again */ }
+  return null;
+}
+
+function writeSession(next) {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(next)); } catch { /* memory only */ }
+}
+
+function clearSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch { /* nothing to clear */ }
+}
+
+let session = readSession();
 let projects = loadProjects();
 let activeProjectId = projects[0]?.id || null;
 let viewMode = "both";
@@ -207,6 +231,10 @@ function persist() {
   const project = activeProject();
   if (project) project.updatedAt = new Date().toISOString();
   cacheProjects();
+  if (!session) {
+    setSaveState("Sign in to save your work");
+    return;
+  }
   if (booted) markDirty();
   if (!serverReady) {
     setSaveState("Not saving to Neon — kept in this browser");
@@ -220,7 +248,7 @@ function persist() {
 function sendProjects(keepalive = false) {
   return fetch(API_URL, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Loopwork-Code": session?.code || "" },
     body: JSON.stringify({ projects }),
     keepalive
   });
@@ -250,12 +278,19 @@ function saveToServer() {
 }
 
 async function syncFromServer() {
-  const bootIds = projects.map((project) => project.id).join("|");
+  if (!session) return false;
   let payload = null;
   let failure = "unreachable";
   for (let attempt = 0; attempt < 3 && !payload; attempt += 1) {
     try {
-      const response = await fetch(API_URL, { headers: { Accept: "application/json" }, cache: "no-store" });
+      const response = await fetch(API_URL, {
+        headers: { Accept: "application/json", "X-Loopwork-Code": session.code },
+        cache: "no-store"
+      });
+      if (response.status === 401) {
+        openLoginScreen("That code is not signed in. Enter it again.");
+        return false;
+      }
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
       payload = await response.json();
     } catch (error) {
@@ -266,7 +301,7 @@ async function syncFromServer() {
   if (!payload) {
     serverReady = false;
     setSaveState(`Not saving to Neon (${failure}) — kept in this browser`);
-    return;
+    return false;
   }
   serverReady = true;
   // Always restore from the server so progress is consistent across devices.
@@ -284,6 +319,7 @@ async function syncFromServer() {
   }
   clearDirty();
   setSaveState("Saved to Neon");
+  return true;
 }
 
 function formatLabel(label) { return label.replace(/^r(\d+)$/i, "Round $1").replace(/^rnd\s/i, "Round "); }
@@ -334,19 +370,32 @@ function renderSequence(round) {
   const grid = $("#sequence-grid");
   const flattened = round.operations.flatMap((op, index) => op.outputs.map((output) => ({ op, output, index })));
   const next = flattened.find((item) => !item.output.done);
+  const nextKey = next ? `${next.op.id}:${next.output.id}` : null;
   const nextOpIndex = round.operations.findIndex((op) => !operationDone(op));
   grid.className = `sequence-grid view-${viewMode}`;
   grid.innerHTML = round.operations.map((op, index) => {
     const outputsDone = op.outputs.filter((output) => output.done).length;
     const complete = operationDone(op);
     const isCurrent = index === nextOpIndex;
-    const outputButtons = op.outputs.map((output) => `<button type="button" class="output-chip" data-output="${op.id}:${output.id}" aria-pressed="${output.done}" aria-label="Output stitch ${output.number}, ${output.done ? "complete" : "not complete"}">${output.number}</button>`).join("");
+    const outputButtons = op.outputs.map((output) => {
+      // Stitches are worked in sequence, so only the next one can be marked.
+      // Anything already done can still be reopened for a correction.
+      const locked = !output.done && `${op.id}:${output.id}` !== nextKey;
+      const label = output.done
+        ? `Output stitch ${output.number}, complete`
+        : locked
+          ? `Output stitch ${output.number}, locked until the earlier stitches are done`
+          : `Output stitch ${output.number}, not complete`;
+      return `<button type="button" class="output-chip${locked ? " is-locked" : ""}" data-output="${op.id}:${output.id}" aria-pressed="${output.done}"${locked ? " disabled title=\"Work in order — finish the earlier stitches first\"" : ""} aria-label="${label}">${output.number}</button>`;
+    }).join("");
     const grouping = op.outputCount > 1 ? `${op.outputs[0].number}–${op.outputs.at(-1).number}` : op.outputs[0]?.number ?? "—";
     const instruction = stitchNames[op.type] || op.type;
     const target = op.inputCount === 0 ? "No base stitch" : op.inputCount > 1 ? `Into ${op.inputCount} stitches` : `Base stitch ${op.inputStart}`;
-    const completeLabel = complete ? `Reopen ${op.label || instruction}` : `Complete ${op.label || instruction} at base stitch ${op.inputStart}`;
+    // A whole operation can only be ticked once the ones before it are done.
+    const lockedOp = !complete && round.operations.slice(0, index).some((item) => !operationDone(item));
+    const completeLabel = complete ? `Reopen ${op.label || instruction}` : lockedOp ? `${op.label || instruction} is locked until the earlier operations are done` : `Complete ${op.label || instruction} at base stitch ${op.inputStart}`;
     return `<article class="operation-cell ${isCurrent ? "is-current" : ""} ${complete ? "is-done" : ""}" data-operation="${op.id}">
-      <button class="card-hitarea" type="button" data-complete-operation="${op.id}" aria-label="${escapeHtml(completeLabel)}" aria-pressed="${complete}"></button>
+      <button class="card-hitarea" type="button" data-complete-operation="${op.id}" aria-label="${escapeHtml(completeLabel)}" aria-pressed="${complete}"${lockedOp ? " disabled" : ""}></button>
       <div class="op-meta"><span>${escapeHtml(grouping)}</span><span>${op.outputCount > 1 ? `${outputsDone}/${op.outputCount}` : complete ? "Done" : ""}</span></div>
       <strong class="op-name">${escapeHtml(op.label && op.label !== op.type ? op.label : instruction)}</strong>
       <span class="op-target">${escapeHtml(target)}</span>
@@ -461,10 +510,28 @@ function advanceWhenComplete(roundId) {
   }, 500);
 }
 
+// The round is a sequence, not a checklist: only the next unfinished stitch can
+// be marked, so a glance at the sequence always matches what is in the hands.
+function nextStitch(round) {
+  for (const op of round.operations) {
+    const output = op.outputs.find((item) => !item.done);
+    if (output) return { op, output };
+  }
+  return null;
+}
+
 function toggleOutput(opId, outputId) {
-  const op = currentRound().operations.find((item) => item.id === opId);
+  const round = currentRound();
+  const op = round.operations.find((item) => item.id === opId);
   const output = op?.outputs.find((item) => item.id === outputId);
   if (!op || !output) return;
+  if (!output.done) {
+    const next = nextStitch(round);
+    if (!next || next.output.id !== output.id) {
+      announce(next ? `Work in order — stitch ${next.output.number} comes first.` : "This round is already complete.");
+      return;
+    }
+  }
   snapshotProgress();
   output.done = !output.done;
   if (op.outputs.every((item) => item.done)) op.done = true;
@@ -475,10 +542,16 @@ function toggleOutput(opId, outputId) {
 }
 
 function toggleOperation(opId) {
-  const op = currentRound().operations.find((item) => item.id === opId);
+  const round = currentRound();
+  const op = round.operations.find((item) => item.id === opId);
   if (!op) return;
-  snapshotProgress();
   const next = !operationDone(op);
+  if (next && round.operations.slice(0, round.operations.indexOf(op)).some((item) => !operationDone(item))) {
+    const first = round.operations.find((item) => !operationDone(item));
+    announce(`Work in order — ${first?.label || stitchNames[first?.type] || "the earlier operation"} comes first.`);
+    return;
+  }
+  snapshotProgress();
   op.done = next;
   op.outputs.forEach((output) => { output.done = next; });
   render();
@@ -494,8 +567,10 @@ function completeNext() {
     toggleOperation(op.id);
     return;
   }
-  const output = op.outputs.find((item) => !item.done);
-  if (output) toggleOutput(op.id, output.id);
+  // The next stitch is whatever comes first in the sequence, so a partly marked
+  // operation finishes before the following one starts.
+  const next = nextStitch(round) || { op, output: op.outputs.find((item) => !item.done) };
+  if (next.output) toggleOutput(next.op.id, next.output.id);
 }
 
 function undo() {
@@ -711,21 +786,108 @@ document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); undo(); }
 });
 
+// ---- sign in with a name and a code -------------------------------------
+
+function openLoginScreen(message = "") {
+  session = null;
+  clearSession();
+  serverReady = false;
+  booted = false;
+  projects = [];
+  activeProjectId = null;
+  undoStack = [];
+  try { localStorage.removeItem(STORAGE_KEY); } catch { /* nothing cached */ }
+  clearDirty();
+  $("#account-name").hidden = true;
+  $("#account-button").hidden = true;
+  setSaveState("Sign in to save your work");
+  const screen = $("#login-screen");
+  screen.hidden = false;
+  const error = $("#login-error");
+  error.hidden = !message;
+  error.textContent = message;
+  $("#login-name").focus();
+}
+
+async function startApp() {
+  $("#login-screen").hidden = true;
+  $("#account-name").textContent = session.name;
+  $("#account-name").hidden = false;
+  $("#account-button").hidden = false;
+  render();
+  booted = true;
+  const synced = await syncFromServer();
+  // A code nobody has used yet opens an empty workspace; the sample pattern is
+  // friendlier than a blank page, and it is saved to the new account.
+  if (synced && session && !projects.length) {
+    projects = seedProjects();
+    activeProjectId = projects[0].id;
+    render();
+    persist();
+  }
+}
+
+async function submitLogin(event) {
+  event.preventDefault();
+  const name = $("#login-name").value.trim();
+  const code = $("#login-code").value.trim();
+  const error = $("#login-error");
+  if (!name || !code) {
+    error.hidden = false;
+    error.textContent = "Enter both a name and a code.";
+    return;
+  }
+  const submit = $("#login-submit");
+  submit.disabled = true;
+  submit.textContent = "Opening…";
+  error.hidden = true;
+  try {
+    const response = await fetch(SESSION_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, code })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      error.hidden = false;
+      error.textContent = payload.message || "Could not open your projects. Try again.";
+      return;
+    }
+    session = { name: payload.name, code: payload.code };
+    writeSession(session);
+    // Never carry the previous account's projects into this one.
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* nothing cached */ }
+    projects = [];
+    activeProjectId = null;
+    undoStack = [];
+    $("#login-code").value = session.code;
+    await startApp();
+    announce(`Signed in as ${session.name}.`);
+  } catch {
+    error.hidden = false;
+    error.textContent = "Could not reach the server. Check your connection and try again.";
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "Open my projects";
+  }
+}
+
+$("#login-form").addEventListener("submit", submitLogin);
+$("#account-button").addEventListener("click", () => openLoginScreen("Signed out. Enter your name and code to come back."));
+
 applyTheme(document.documentElement.dataset.theme || "light");
-render();
-booted = true;
-syncFromServer();
+if (session) startApp(); else openLoginScreen();
 
 // Never lose the newest change when the tab is closed or reloaded.
 window.addEventListener("pagehide", () => {
-  if (!serverReady || !hasUnsyncedChanges()) return;
+  if (!session || !serverReady || !hasUnsyncedChanges()) return;
   window.clearTimeout(saveTimer);
   sendProjects(true).catch(() => { /* the next load retries from the browser copy */ });
 });
 
 // Catch up after sleeping, or after the database comes back.
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) return;
+  if (document.hidden || !session) return;
   if (!serverReady) { syncFromServer(); return; }
   if (hasUnsyncedChanges()) saveToServer();
 });
