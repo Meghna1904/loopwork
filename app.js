@@ -526,6 +526,7 @@ function openDialog(mode = "edit") {
   manualRounds = project ? project.rounds.map((round) => ({ label: round.label, instruction: round.originalText })) : [];
   renderManualRounds();
   setInputMode("paste");
+  setReviewState("unreviewed");
   $("#pattern-dialog").showModal();
   $("#pattern-name").focus();
 }
@@ -540,6 +541,7 @@ function setInputMode(mode) {
   $("#save-pattern").disabled = false;
   const action = $("#save-pattern").dataset.action;
   $("#save-pattern").textContent = action === "new" ? "Review and save" : "Review changes";
+  setReviewState("unreviewed");
 }
 
 function renderManualRounds() {
@@ -547,6 +549,7 @@ function renderManualRounds() {
   $$('[data-remove-manual]').forEach((button) => button.addEventListener("click", () => {
     manualRounds.splice(Number(button.dataset.removeManual), 1);
     renderManualRounds();
+    markPendingStale();
   }));
 }
 
@@ -568,9 +571,35 @@ function reviewPattern() {
       warnings.push(`${round.label}: ${round.warning}`);
     }
   });
-  pendingImport = { rounds: parsed.rounds, source, name, description: $("#pattern-description").value.trim(), warnings, modified: false };
+  pendingImport = { rounds: parsed.rounds, source, name, description: $("#pattern-description").value.trim(), warnings, modified: false, stale: false };
   renderPendingReview();
   $("#save-pattern").textContent = "Accept pattern";
+  setReviewState("reviewed");
+}
+
+// Three review states: nothing read yet, read and matching the text, or read
+// and then edited. A stale review can never be accepted, so an old parse can
+// not be saved over text the user has since changed.
+function setReviewState(state) {
+  const again = $("#review-again");
+  const save = $("#save-pattern");
+  if (!again || !save) return;
+  again.hidden = state === "unreviewed";
+  const empty = state === "reviewed" && (!pendingImport || pendingImport.rounds.length === 0);
+  save.disabled = state === "stale" || Boolean(empty);
+}
+
+function markPendingStale() {
+  if (!pendingImport || pendingImport.stale) return;
+  pendingImport.stale = true;
+  setReviewState("stale");
+  const review = $("#parse-review");
+  if (review && !$("#review-stale")) {
+    review.insertAdjacentHTML(
+      "afterbegin",
+      '<p class="review-warning" id="review-stale">The instructions changed since this review. Choose “Review changes” to read them again.</p>'
+    );
+  }
 }
 
 function renderPendingReview() {
@@ -606,6 +635,7 @@ function renderPendingReview() {
 
 function savePattern() {
   if (!pendingImport) { reviewPattern(); return; }
+  if (pendingImport.stale) { markPendingStale(); reviewPattern(); return; }
   if (!pendingImport.rounds.length) return;
   const mode = $("#save-pattern").dataset.action;
   const previous = mode === "new" ? null : activeProject();
@@ -635,6 +665,7 @@ function addManualRound() {
   $("#manual-label").value = `Round ${manualRounds.length + 1}`;
   $("#manual-instruction").value = "";
   renderManualRounds();
+  markPendingStale();
   $("#manual-instruction").focus();
 }
 
@@ -653,6 +684,10 @@ $("#previous-round").addEventListener("click", () => changeRound(-1));
 $("#next-round").addEventListener("click", () => changeRound(1));
 $("#cancel-edit").addEventListener("click", () => $("#pattern-dialog").close());
 $("#save-pattern").addEventListener("click", savePattern);
+$("#review-again").addEventListener("click", reviewPattern);
+["#pattern-source", "#pattern-name", "#pattern-description"].forEach((selector) => {
+  $(selector).addEventListener("input", markPendingStale);
+});
 $("#add-manual-round").addEventListener("click", addManualRound);
 $$('[data-input-mode]').forEach((tab) => tab.addEventListener("click", () => setInputMode(tab.dataset.inputMode)));
 $$('[data-view]').forEach((button) => button.addEventListener("click", () => { viewMode = button.dataset.view; render(); }));
