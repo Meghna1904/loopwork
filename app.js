@@ -44,6 +44,8 @@ function materializeRound(draft) {
     issues: draft.issues || [],
     status: draft.status,
     warning: draft.warning || "",
+    inferredMessage: draft.inferredMessage || "",
+    worksIntoRing: Boolean(draft.worksIntoRing),
     complete: false
   };
 }
@@ -87,6 +89,8 @@ function repairProjectPattern(project) {
     if (!fresh) return true;
     return round.label !== fresh.label
       || round.expectedOutput !== fresh.expectedOutput
+      || round.status !== fresh.status
+      || round.warning !== fresh.warning
       || (round.operations?.length ?? 0) !== fresh.operations.length;
   });
   if (!stale) return project;
@@ -397,7 +401,7 @@ function render() {
   $("#progress-fill").style.transform = `scaleX(${total ? done / total : 0})`;
   $("#progress-bar").setAttribute("aria-valuemax", total);
   $("#progress-bar").setAttribute("aria-valuenow", done);
-  $("#round-count-summary").textContent = `${round.operations.length} operations · ${total} output stitches`;
+  $("#round-count-summary").textContent = `${round.operations.length} operations · ${total} output stitches${round.worksIntoRing ? " · works into the ring" : ""}`;
   $("#complete-next").disabled = finished;
   $("#complete-next").innerHTML = finished ? "Round complete" : `Mark ${progressMode === "output" ? "stitch" : "operation"} complete <kbd>Space</kbd>`;
   $("#undo-progress").disabled = undoStack.length === 0;
@@ -410,8 +414,11 @@ function render() {
   $$("[data-progress]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.progress === progressMode)));
   const note = $("#parse-note");
   const repairMessage = project.patternRepaired ? "This saved pattern was rebuilt from its original instructions. Review the round totals before you continue." : "";
-  note.hidden = !round.warning && !repairMessage;
-  note.textContent = round.warning || repairMessage;
+  // Every status reaches the page, not just the warning text: inferred counts,
+  // review checks and blocked rounds each look different.
+  note.dataset.status = round.status || "clear";
+  note.hidden = !round.warning && !round.inferredMessage && !repairMessage;
+  note.textContent = round.warning || round.inferredMessage || repairMessage;
   renderRoundList(project, round);
   renderSequence(round);
   persist();
