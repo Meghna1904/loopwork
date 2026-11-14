@@ -1,4 +1,4 @@
-import { parsePattern as parsePatternSource, parseRoundDraft, STITCHES } from "./lib/parser/index.js";
+import { parseDocument, documentRounds, parseRoundDraft, STITCHES } from "./lib/parser/index.js";
 const STORAGE_KEY = "loopwork-projects-v1";
 const THEME_KEY = "loopwork-theme-v1";
 const API_URL = "/api/projects";
@@ -46,6 +46,9 @@ function materializeRound(draft) {
     warning: draft.warning || "",
     inferredMessage: draft.inferredMessage || "",
     worksIntoRing: Boolean(draft.worksIntoRing),
+    notes: draft.notes || [],
+    part: draft.part || null,
+    partQuantity: draft.partQuantity || 1,
     complete: false
   };
 }
@@ -56,10 +59,12 @@ function makeRound(label, instruction, options = {}) {
 }
 
 // The pattern engine owns all reading and counting; the app only adds ids and
-// progress state on top of what it returns.
+// progress state on top of what it returns. A pasted document (title,
+// materials, parts, assembly) is read as a document, and its parts are laid
+// out as one round list for the work view.
 function parsePattern(text) {
-  const parsed = parsePatternSource(text);
-  return { rounds: (parsed.rounds || []).map(materializeRound), warnings: parsed.warnings || [] };
+  const parsed = parseDocument(text);
+  return { rounds: documentRounds(parsed).map(materializeRound), warnings: parsed.warnings || [] };
 }
 
 function seedProjects() {
@@ -416,9 +421,13 @@ function render() {
   const repairMessage = project.patternRepaired ? "This saved pattern was rebuilt from its original instructions. Review the round totals before you continue." : "";
   // Every status reaches the page, not just the warning text: inferred counts,
   // review checks and blocked rounds each look different.
+  // Every status reaches the page, not just the warning text: inferred counts,
+  // review checks and blocked rounds each look different. Notes written around
+  // a round (eyes, stuffing, fasten off) are shown with it, never as errors.
   note.dataset.status = round.status || "clear";
-  note.hidden = !round.warning && !round.inferredMessage && !repairMessage;
-  note.textContent = round.warning || round.inferredMessage || repairMessage;
+  const roundNotes = (round.notes || []).map((item) => (item.hint ? `${item.text} (${item.hint})` : item.text)).join(" ");
+  note.hidden = !round.warning && !round.inferredMessage && !repairMessage && !roundNotes;
+  note.textContent = [round.warning, round.inferredMessage, repairMessage, roundNotes].filter(Boolean).join(" ");
   renderRoundList(project, round);
   renderSequence(round);
   persist();
