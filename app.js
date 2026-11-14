@@ -458,6 +458,12 @@ function render() {
   $("#round-count-summary").textContent = `${round.operations.length} operations · ${total} output stitches${round.worksIntoRing ? " · works into the ring" : ""}`;
   $("#complete-next").disabled = finished;
   $("#complete-next").innerHTML = finished ? "Round complete" : `Mark ${progressMode === "output" ? "stitch" : "operation"} complete <kbd>Space</kbd>`;
+  // A whole round can be settled in one go for the times it was worked away
+  // from the screen; the same button reopens it if that was a mistake.
+  const roundAllDone = round.operations.length > 0 && round.operations.every(operationDone);
+  $("#complete-round").textContent = roundAllDone ? "Reopen round" : "Mark round done";
+  $("#complete-round").disabled = round.operations.length === 0;
+  $("#complete-round").setAttribute("aria-pressed", String(roundAllDone));
   $("#undo-progress").disabled = undoStack.length === 0;
   $("#next-up-number").textContent = finished ? "All done" : nextOutput ? `Stitch ${nextOutput.number}` : `Operation ${round.operations.indexOf(nextOp) + 1}`;
   $("#next-up-operation").textContent = finished ? "This round is complete" : nextOp.label && nextOp.label !== nextOp.type ? nextOp.label : stitchNames[nextOp.type] || nextOp.type;
@@ -557,6 +563,20 @@ function toggleOperation(opId) {
   render();
   announce(`${next ? "Completed" : "Reopened"} ${op.label || stitchNames[op.type]}.`);
   advanceWhenComplete(currentRound().id);
+}
+
+function toggleRoundComplete() {
+  const round = currentRound();
+  if (!round.operations.length) return;
+  const markDone = !round.operations.every(operationDone);
+  snapshotProgress();
+  round.operations.forEach((op) => {
+    op.done = markDone;
+    op.outputs.forEach((output) => { output.done = markDone; });
+  });
+  render();
+  announce(markDone ? `${formatLabel(round.label)} marked complete.` : `${formatLabel(round.label)} reopened.`);
+  if (markDone) advanceWhenComplete(round.id);
 }
 
 function completeNext() {
@@ -763,6 +783,7 @@ $("#theme-toggle").addEventListener("click", () => setTheme(document.documentEle
 $("#edit-pattern-inline").addEventListener("click", () => openDialog());
 $("#rename-project").addEventListener("click", () => openDialog());
 $("#complete-next").addEventListener("click", completeNext);
+$("#complete-round").addEventListener("click", toggleRoundComplete);
 $("#undo-progress").addEventListener("click", undo);
 $("#previous-round").addEventListener("click", () => changeRound(-1));
 $("#next-round").addEventListener("click", () => changeRound(1));
