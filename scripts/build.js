@@ -1,10 +1,13 @@
-import { copyFile, mkdir, readdir } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 const root = new URL("../", import.meta.url);
 const output = new URL("../dist/", import.meta.url);
 const staticFiles = ["index.html", "app.css", "app.js", "guide.js", "base.css", "tokens.css"];
 
+// Start clean every time: a leftover file from an older build layout used to
+// keep shipping, and a stale module at a stale path hides a broken one.
+await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 await Promise.all(staticFiles.map((file) => copyFile(new URL(file, root), new URL(file, output))));
 
@@ -16,7 +19,9 @@ async function copyTree(fromUrl, toUrl) {
   for (const item of await readdir(fromUrl, { withFileTypes: true })) {
     const source = new URL(item.name, fromUrl);
     const target = new URL(item.name, toUrl);
-    if (item.isDirectory()) await copyTree(new URL(`${item.name}/`, fromUrl), target);
+    // Both sides need the trailing slash, or URL resolution treats the
+    // directory as a file and writes its children one level too high.
+    if (item.isDirectory()) await copyTree(new URL(`${item.name}/`, fromUrl), new URL(`${item.name}/`, toUrl));
     else await copyFile(source, target);
   }
 }
