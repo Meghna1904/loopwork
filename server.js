@@ -9,7 +9,10 @@ import { handleProjectsRequest, handleSessionRequest } from "./lib/projects-api.
 await loadEnv();
 
 const root = fileURLToPath(new URL(".", import.meta.url));
-const port = Number(process.env.PORT || 4173);
+// A PORT of 0 (or a non-number) means "no port chosen" here, not "any port":
+// binding 0 would put the app on a random port nobody can navigate to.
+const requestedPort = Number(process.env.PORT);
+const port = Number.isInteger(requestedPort) && requestedPort > 0 ? requestedPort : 4173;
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
