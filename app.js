@@ -143,10 +143,44 @@ function loadProjects() {
   return readCachedProjects() ?? seedProjects();
 }
 
-function setSaveState(message) {
-  const state = $("#save-state");
-  if (state) state.textContent = message;
+// The save status is one pill in the navbar: icon, short label, and how long
+// ago it saved. It must never wrap or push the other controls around.
+const SAVE_KINDS = {
+  saved: { icon: "✓", label: "Saved to Neon" },
+  saving: { icon: "◌", label: "Saving…" },
+  device: { icon: "⚠", label: "Only on this device" },
+  error: { icon: "✕", label: "Couldn't save" }
+};
+let savedAt = 0;
+
+function setSaveState(kind, detail = "") {
+  const pill = $("#save-state");
+  if (!pill) return;
+  const known = SAVE_KINDS[kind] ? kind : "device";
+  pill.dataset.kind = known;
+  $("#save-icon").textContent = SAVE_KINDS[known].icon;
+  $("#save-label").textContent = SAVE_KINDS[known].label;
+  $("#save-retry").hidden = known !== "error";
+  pill.title = detail || SAVE_KINDS[known].label;
+  if (known === "saved") savedAt = Date.now();
+  updateSaveTime();
 }
+
+function updateSaveTime() {
+  const pill = $("#save-state");
+  const time = $("#save-time");
+  if (!pill || !time) return;
+  if (!savedAt || pill.dataset.kind !== "saved") {
+    time.hidden = true;
+    return;
+  }
+  const seconds = Math.max(0, Math.floor((Date.now() - savedAt) / 1000));
+  time.hidden = false;
+  time.textContent = seconds < 45 ? "· just now" : seconds < 3600 ? `· ${Math.max(1, Math.round(seconds / 60))} min ago` : "· earlier";
+  pill.title = `Saved to Neon ${time.textContent.replace("· ", "")}`;
+}
+
+window.setInterval(updateSaveTime, 20000);
 
 // The code is the whole account: no password, no email, nothing to verify. It
 // has to travel with every request so the server can tell whose projects these
@@ -193,9 +227,12 @@ function applyTheme(theme) {
   const dark = theme === "dark";
   document.documentElement.dataset.theme = dark ? "dark" : "light";
   const toggle = $("#theme-toggle");
-  toggle.textContent = dark ? "Light mode" : "Dark mode";
+  toggle.textContent = dark ? "☀" : "☾";
   toggle.setAttribute("aria-pressed", String(dark));
   toggle.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
+  toggle.title = dark ? "Switch to light mode" : "Switch to dark mode";
+  const menuTheme = $("#menu-theme");
+  if (menuTheme) menuTheme.innerHTML = `<span aria-hidden="true">${dark ? "☀" : "☾"}</span> ${dark ? "Light mode" : "Dark mode"}`;
   $("meta[name='theme-color']").content = dark ? "#191918" : "#f5f0e5";
 }
 function setTheme(theme) {
@@ -232,15 +269,15 @@ function persist() {
   if (project) project.updatedAt = new Date().toISOString();
   cacheProjects();
   if (!session) {
-    setSaveState("Sign in to save your work");
+    setSaveState("device");
     return;
   }
   if (booted) markDirty();
   if (!serverReady) {
-    setSaveState("Not saving to Neon — kept in this browser");
+    setSaveState("device");
     return;
   }
-  setSaveState("Saving…");
+  setSaveState("saving");
   window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(saveToServer, 400);
 }
@@ -263,11 +300,11 @@ function saveToServer() {
       saveAttempts = 0;
       window.clearTimeout(retryTimer);
       clearDirty();
-      setSaveState("Saved to Neon");
+      setSaveState("saved");
     } catch (error) {
       markDirty();
       saveAttempts += 1;
-      setSaveState(`Not saving to Neon (${error.message}) — kept in this browser`);
+      setSaveState("error", `Couldn't save to Neon (${error.message}).`);
       if (saveAttempts < 5) {
         window.clearTimeout(retryTimer);
         retryTimer = window.setTimeout(saveToServer, Math.min(2000 * saveAttempts, 10000));
@@ -300,7 +337,7 @@ async function syncFromServer() {
   }
   if (!payload) {
     serverReady = false;
-    setSaveState(`Not saving to Neon (${failure}) — kept in this browser`);
+    setSaveState("device", `Not saving to Neon (${failure}).`);
     return false;
   }
   serverReady = true;
@@ -318,7 +355,7 @@ async function syncFromServer() {
     restoring = false;
   }
   clearDirty();
-  setSaveState("Saved to Neon");
+  setSaveState("saved");
   return true;
 }
 
@@ -819,9 +856,8 @@ function openLoginScreen(message = "") {
   undoStack = [];
   try { localStorage.removeItem(STORAGE_KEY); } catch { /* nothing cached */ }
   clearDirty();
-  $("#account-name").hidden = true;
-  $("#account-button").hidden = true;
-  setSaveState("Sign in to save your work");
+  setAccountChrome();
+  setSaveState("device");
   const screen = $("#login-screen");
   screen.hidden = false;
   const error = $("#login-error");
@@ -832,9 +868,7 @@ function openLoginScreen(message = "") {
 
 async function startApp() {
   $("#login-screen").hidden = true;
-  $("#account-name").textContent = session.name;
-  $("#account-name").hidden = false;
-  $("#account-button").hidden = false;
+  setAccountChrome();
   render();
   booted = true;
   const synced = await syncFromServer();
@@ -894,7 +928,82 @@ async function submitLogin(event) {
 }
 
 $("#login-form").addEventListener("submit", submitLogin);
-$("#account-button").addEventListener("click", () => openLoginScreen("Signed out. Enter your name and code to come back."));
+
+// ---- navbar menu ---------------------------------------------------------
+
+function toggleMenu(force) {
+  const menu = $("#nav-menu");
+  if (!menu) return;
+  const open = force === undefined ? menu.hidden : force;
+  menu.hidden = !open;
+  $("#account-button").setAttribute("aria-expanded", String(open));
+  $("#nav-menu-button").setAttribute("aria-expanded", String(open));
+  if (open) menu.querySelector("button:not([hidden])")?.focus();
+}
+
+// Signed in, the avatar carries the name, backup and sign-out. Signed out it is
+// a plain "Sign in" button, and the save pill says this device only.
+function setAccountChrome() {
+  const signedIn = Boolean(session);
+  $("#account-avatar").hidden = !signedIn;
+  $("#account-name").hidden = !signedIn;
+  $(".account-chevron").hidden = !signedIn;
+  $("#account-signin").hidden = signedIn;
+  $("#account-button").classList.toggle("is-signed-out", !signedIn);
+  $("#account-button").setAttribute("aria-haspopup", signedIn ? "menu" : "false");
+  if (signedIn) {
+    $("#account-avatar").textContent = (session.name.trim()[0] || "L").toUpperCase();
+    $("#account-name").textContent = session.name;
+    $("#account-button").setAttribute("aria-label", `Account menu for ${session.name}`);
+  } else {
+    $("#account-button").setAttribute("aria-label", "Sign in");
+  }
+  $("#nav-menu-head").hidden = !signedIn;
+  $("#nav-menu-name").hidden = !signedIn;
+  $("#nav-menu-name").textContent = signedIn ? session.name : "";
+  $("#menu-signout").hidden = !signedIn;
+  $("#menu-signin").hidden = signedIn;
+}
+
+function exportBackup() {
+  const payload = { exportedAt: new Date().toISOString(), account: session?.name || null, projects };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `loopwork-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  announce("Backup exported.");
+}
+
+$("#account-button").addEventListener("click", (event) => {
+  event.stopPropagation();
+  if (!session) { openLoginScreen(); return; }
+  toggleMenu();
+});
+$("#nav-menu-button").addEventListener("click", (event) => { event.stopPropagation(); toggleMenu(); });
+$("#nav-menu").addEventListener("click", (event) => {
+  const item = event.target.closest("[data-menu-action]");
+  if (!item) return;
+  toggleMenu(false);
+  const action = item.dataset.menuAction;
+  if (action === "edit") openDialog();
+  else if (action === "theme") setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+  else if (action === "export") exportBackup();
+  else if (action === "signout") openLoginScreen("Signed out. Enter your name and code to come back.");
+  else if (action === "signin") openLoginScreen();
+});
+$("#save-retry").addEventListener("click", () => { setSaveState("saving"); saveToServer(); });
+document.addEventListener("click", (event) => {
+  const menu = $("#nav-menu");
+  if (!menu || menu.hidden) return;
+  if (event.target.closest("#nav-menu, #account-button, #nav-menu-button")) return;
+  toggleMenu(false);
+});
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") toggleMenu(false); });
 
 applyTheme(document.documentElement.dataset.theme || "light");
 if (session) startApp(); else openLoginScreen();

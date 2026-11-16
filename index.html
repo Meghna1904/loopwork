@@ -32,14 +32,38 @@
       </form>
     </section>
     <header class="topbar">
-      <a class="wordmark" href="#" aria-label="Loopwork home">Loopwork<span>.</span></a>
-      <div class="topbar-center">A calmer way to follow a pattern</div>
+      <a class="brand" href="#" aria-label="Loopwork home">
+        <span class="wordmark">Loopwork<span>.</span></span>
+        <span class="tagline">A calmer way to follow a pattern</span>
+      </a>
       <div class="topbar-actions">
-        <span class="account-name" id="account-name" hidden></span>
-        <button class="button button-quiet account-button" id="account-button" type="button" hidden>Sign out</button>
-        <span class="save-state" id="save-state" role="status">Saved on this device</span>
-        <button class="button button-quiet theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Dark mode</button>
-        <button class="button button-quiet" id="open-patterns" type="button">Edit pattern</button>
+        <span class="save-state" id="save-state" data-kind="device" role="status" aria-live="polite">
+          <span class="save-icon" id="save-icon" aria-hidden="true">•</span>
+          <span class="save-label" id="save-label">Only on this device</span>
+          <span class="save-time" id="save-time" hidden></span>
+          <button class="save-retry" id="save-retry" type="button" hidden>Try again</button>
+        </span>
+        <button class="button button-outline nav-edit" id="open-patterns" type="button">
+          <span class="nav-icon" aria-hidden="true">✎</span><span class="nav-label">Edit pattern</span>
+        </button>
+        <button class="icon-button nav-theme" id="theme-toggle" type="button" aria-pressed="false" aria-label="Switch to dark mode" title="Switch to dark mode">☾</button>
+        <button class="account-button" id="account-button" type="button" aria-expanded="false" aria-controls="nav-menu">
+          <span class="avatar" id="account-avatar" aria-hidden="true"></span>
+          <span class="account-name" id="account-name"></span>
+          <span class="account-chevron" aria-hidden="true">⌄</span>
+          <span class="account-signin" id="account-signin" hidden>Sign in</span>
+        </button>
+        <button class="icon-button nav-menu-button" id="nav-menu-button" type="button" aria-expanded="false" aria-controls="nav-menu" aria-label="Open menu">☰</button>
+      </div>
+      <div class="nav-menu" id="nav-menu" role="menu" aria-label="Account and app menu" hidden>
+        <p class="nav-menu-head" id="nav-menu-head">Signed in as</p>
+        <p class="nav-menu-name" id="nav-menu-name"></p>
+        <hr class="nav-menu-rule" />
+        <button class="nav-menu-item nav-menu-phone" type="button" role="menuitem" data-menu-action="edit"><span aria-hidden="true">✎</span> Edit pattern</button>
+        <button class="nav-menu-item nav-menu-phone" type="button" role="menuitem" data-menu-action="theme" id="menu-theme"><span aria-hidden="true">☾</span> Dark mode</button>
+        <button class="nav-menu-item" type="button" role="menuitem" data-menu-action="export"><span aria-hidden="true">⤓</span> Export backup</button>
+        <button class="nav-menu-item" type="button" role="menuitem" data-menu-action="signout" id="menu-signout"><span aria-hidden="true">⏻</span> Sign out</button>
+        <button class="nav-menu-item" type="button" role="menuitem" data-menu-action="signin" id="menu-signin" hidden><span aria-hidden="true">→</span> Sign in</button>
       </div>
     </header>
 
