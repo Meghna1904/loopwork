@@ -418,8 +418,10 @@ test("a plain amigurumi pattern reads all eight rounds", () => {
 test("ch 3, dc in next 2 sts, turn reads three counts without junk", () => {
   const result = parse("ch 3, dc in next 2 sts, turn");
   assert.deepEqual(result.types, ["CH", "CH", "CH", "DC", "DC", "TURN"]);
+  // Chains and turns set the row up; they are not stitches in the count.
   assert.equal(result.inputCount, 2);
-  assert.equal(result.outputCount, 5);
+  assert.equal(result.outputCount, 2);
+  assert.deepEqual(result.operations.map((operation) => operation.counts), [false, false, false, true, true, false]);
   assert.equal(result.parsed.declaredTotal, null);
   assert.deepEqual(result.parsed.issues, []);
 });
