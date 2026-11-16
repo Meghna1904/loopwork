@@ -301,6 +301,7 @@ function saveToServer() {
       window.clearTimeout(retryTimer);
       clearDirty();
       setSaveState("saved");
+      flushDeletes();
     } catch (error) {
       markDirty();
       saveAttempts += 1;
@@ -312,6 +313,32 @@ function saveToServer() {
     }
   });
   return saveChain;
+}
+
+let pendingDeletes = [];
+
+// Removing a project is its own request, so a stale list can never delete one by
+// omission. If the request cannot be sent yet, it waits and is retried.
+function queueDelete(id) {
+  if (!id) return;
+  if (!pendingDeletes.includes(id)) pendingDeletes.push(id);
+  flushDeletes();
+}
+
+async function flushDeletes() {
+  if (!session || !serverReady || !pendingDeletes.length) return;
+  const ids = pendingDeletes.slice();
+  try {
+    const response = await fetch(API_URL, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", "X-Loopwork-Code": session.code },
+      body: JSON.stringify({ ids })
+    });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
+    pendingDeletes = pendingDeletes.filter((id) => !ids.includes(id));
+  } catch (error) {
+    setSaveState("error", `Couldn't remove the project from Neon (${error.message}).`);
+  }
 }
 
 async function syncFromServer() {
@@ -341,13 +368,13 @@ async function syncFromServer() {
     return false;
   }
   serverReady = true;
-  // Always restore from the server so progress is consistent across devices.
-  // The DIRTY_KEY mechanism still protects against losing work within a single
-  // device (the 400ms save debounce + pagehide retry); cross-device sync uses
-  // the server as the single source of truth.
+  // Work that has not reached the server yet is merged with the server copy and
+  // pushed back, so neither side can erase the other. A clean browser simply
+  // adopts the server, which is what keeps two devices in step.
+  const localPending = hasUnsyncedChanges() && projects.length > 0;
   restoring = true;
   try {
-    projects = payload.projects.map(repairProjectPattern);
+    projects = localPending ? mergeProjects(projects, payload.projects) : payload.projects.map(repairProjectPattern);
     if (!projects.some((project) => project.id === activeProjectId)) activeProjectId = projects[0]?.id || null;
     undoStack = [];
     render();
@@ -356,7 +383,25 @@ async function syncFromServer() {
   }
   clearDirty();
   setSaveState("saved");
+  if (localPending) saveToServer();
+  else flushDeletes();
   return true;
+}
+
+// Both copies of the list, united: the newer version of a project wins, and a
+// project only one side knows about is kept either way.
+function mergeProjects(local, remote) {
+  const byId = new Map(remote.map((project) => [project.id, project]));
+  for (const project of local) {
+    const other = byId.get(project.id);
+    if (!other) { byId.set(project.id, project); continue; }
+    const localTime = Date.parse(project.updatedAt || 0) || 0;
+    const remoteTime = Date.parse(other.updatedAt || 0) || 0;
+    byId.set(project.id, localTime >= remoteTime ? project : other);
+  }
+  const order = remote.map((project) => project.id).filter((id) => byId.has(id));
+  for (const project of local) if (!order.includes(project.id)) order.push(project.id);
+  return order.map((id) => repairProjectPattern(byId.get(id)));
 }
 
 function formatLabel(label) { return label.replace(/^r(\d+)$/i, "Round $1").replace(/^rnd\s/i, "Round "); }
@@ -398,6 +443,7 @@ function deleteProject() {
   pendingDeleteProjectId = null;
   undoStack = [];
   $("#delete-project-dialog").close();
+  queueDelete(deleted.id);
   persist();
   render();
   announce(`${deleted.name} was deleted.`);
@@ -448,6 +494,100 @@ function renderSequence(round) {
   $$("[data-complete-operation]", grid).forEach((button) => button.addEventListener("click", () => toggleOperation(button.dataset.completeOperation)));
 }
 
+// ---- photos ----------------------------------------------------------------
+
+const PHOTO_KINDS = { reference: "What I'm making", result: "What I made" };
+const MAX_PHOTOS_PER_KIND = 12;
+let pendingPhotoKind = "reference";
+let openPhotoId = null;
+
+async function shrinkPhoto(file, maxSide = 900) {
+  // Phone photos are several megabytes and the whole project list travels in one
+  // save request, so each photo is kept small enough to stay useful and cheap.
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+  return canvas.toDataURL("image/jpeg", 0.7);
+}
+
+function projectPhotos(project, kind) {
+  return (project.photos || []).filter((photo) => photo.kind === kind);
+}
+
+function renderPhotos(project) {
+  const section = $("#photo-section");
+  if (!section) return;
+  section.hidden = !project;
+  if (!project) return;
+
+  for (const kind of Object.keys(PHOTO_KINDS)) {
+    const grid = $(`#photo-grid-${kind}`);
+    if (!grid) continue;
+    const photos = projectPhotos(project, kind);
+    grid.innerHTML = photos.map((photo, index) => `
+      <button class="photo-thumb" type="button" data-photo="${photo.id}" aria-label="Open ${escapeHtml(PHOTO_KINDS[kind])} photo ${index + 1}">
+        <img src="${photo.data}" alt="${escapeHtml(photo.name || PHOTO_KINDS[kind])}" loading="lazy" />
+      </button>`).join("") + `
+      <button class="photo-add" type="button" data-add-photo="${kind}"${photos.length >= MAX_PHOTOS_PER_KIND ? " disabled" : ""}>
+        <span aria-hidden="true">+</span><span>${photos.length ? "Add more" : "Add photos"}</span>
+      </button>`;
+  }
+
+  $$("[data-add-photo]", section).forEach((button) => button.addEventListener("click", () => {
+    pendingPhotoKind = button.dataset.addPhoto;
+    const input = $("#photo-input");
+    input.value = "";
+    input.click();
+  }));
+  $$("[data-photo]", section).forEach((button) => button.addEventListener("click", () => openPhoto(button.dataset.photo)));
+}
+
+function openPhoto(photoId) {
+  const photo = (activeProject()?.photos || []).find((item) => item.id === photoId);
+  if (!photo) return;
+  openPhotoId = photoId;
+  $("#photo-dialog-image").src = photo.data;
+  $("#photo-dialog-image").alt = photo.name ? `Photo: ${photo.name}` : "Project photo";
+  $("#photo-dialog-title").textContent = PHOTO_KINDS[photo.kind] || "Photo";
+  $("#photo-dialog-caption").textContent = photo.name || "";
+  $("#photo-dialog").showModal();
+}
+
+async function addPhotos(files) {
+  const project = activeProject();
+  if (!project || !files.length) return;
+  const kind = pendingPhotoKind;
+  const room = MAX_PHOTOS_PER_KIND - projectPhotos(project, kind).length;
+  if (room <= 0) {
+    announce(`${PHOTO_KINDS[kind]} already holds ${MAX_PHOTOS_PER_KIND} photos.`);
+    return;
+  }
+  const chosen = files.filter((file) => file.type.startsWith("image/")).slice(0, room);
+  if (!chosen.length) {
+    announce("Those files are not photos.");
+    return;
+  }
+  announce("Adding photos…");
+  const added = [];
+  for (const file of chosen) {
+    try {
+      added.push({ id: makeId(), kind, name: file.name, addedAt: new Date().toISOString(), data: await shrinkPhoto(file) });
+    } catch { /* skip a file the browser cannot decode */ }
+  }
+  if (!added.length) {
+    announce("Those photos could not be read.");
+    return;
+  }
+  project.photos = [...(project.photos || []), ...added];
+  render();
+  const skipped = files.length - chosen.length;
+  announce(`${added.length} photo${added.length === 1 ? "" : "s"} added${skipped > 0 ? `, ${skipped} kept out` : ""}.`);
+}
+
 function renderRoundList(project, selectedRound) {
   const list = $("#round-list");
   list.innerHTML = project.rounds.map((round, index) => {
@@ -470,6 +610,7 @@ function render() {
   $("#main .work-grid").hidden = !hasProject;
   $("#main .workspace-footer").hidden = !hasProject;
   $("#open-patterns").hidden = !hasProject;
+  $("#photo-section").hidden = !hasProject;
   renderProjects();
   if (!project) { persist(); return; }
   const round = currentRound();
@@ -522,6 +663,7 @@ function render() {
   note.textContent = [round.warning, round.inferredMessage, repairMessage, roundNotes].filter(Boolean).join(" ");
   renderRoundList(project, round);
   renderSequence(round);
+  renderPhotos(project);
   persist();
 }
 
@@ -927,6 +1069,22 @@ async function submitLogin(event) {
   }
 }
 
+$("#photo-input").addEventListener("change", (event) => addPhotos([...(event.target.files || [])]));
+$("#photo-dialog-close").addEventListener("click", () => $("#photo-dialog").close());
+$("#photo-dialog-delete").addEventListener("click", () => {
+  const project = activeProject();
+  if (!project || !openPhotoId) return;
+  project.photos = (project.photos || []).filter((photo) => photo.id !== openPhotoId);
+  openPhotoId = null;
+  $("#photo-dialog").close();
+  render();
+  announce("Photo removed.");
+});
+$("#photo-dialog").addEventListener("close", () => {
+  openPhotoId = null;
+  $("#photo-dialog-image").src = "";
+});
+
 $("#login-form").addEventListener("submit", submitLogin);
 
 // ---- navbar menu ---------------------------------------------------------
@@ -1020,4 +1178,5 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden || !session) return;
   if (!serverReady) { syncFromServer(); return; }
   if (hasUnsyncedChanges()) saveToServer();
+  else flushDeletes();
 });

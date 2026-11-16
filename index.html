@@ -150,6 +150,24 @@
           </aside>
         </div>
 
+        <section class="photo-section" id="photo-section" aria-labelledby="photo-heading" hidden>
+          <div class="photo-head">
+            <h2 id="photo-heading">Photos</h2>
+            <p>Keep a picture of the pattern you are following, and of what you made.</p>
+          </div>
+          <div class="photo-groups">
+            <div class="photo-group">
+              <h3>What I'm making</h3>
+              <div class="photo-grid" id="photo-grid-reference"></div>
+            </div>
+            <div class="photo-group">
+              <h3>What I made</h3>
+              <div class="photo-grid" id="photo-grid-result"></div>
+            </div>
+          </div>
+          <input class="photo-input" id="photo-input" type="file" accept="image/*" multiple hidden />
+        </section>
+
         <footer class="workspace-footer"><span>Loopwork <span class="footer-dot">·</span> Pattern companion</span><span><kbd>Space</kbd> mark next <span class="footer-dot">·</span> <kbd>⌘</kbd>/<kbd>Ctrl</kbd> <kbd>Z</kbd> undo</span></footer>
       </main>
     </div>
@@ -191,6 +209,18 @@
         <div class="dialog-actions">
           <button class="button button-quiet" id="cancel-delete-project" type="button">Keep project</button>
           <button class="button button-primary" id="confirm-delete-project" type="button">Delete project</button>
+        </div>
+      </div>
+    </dialog>
+    <dialog class="photo-dialog" id="photo-dialog" aria-labelledby="photo-dialog-title">
+      <form method="dialog" class="dialog-chrome"><button class="icon-button" value="cancel" aria-label="Close photo">×</button></form>
+      <div class="photo-dialog-content">
+        <h2 id="photo-dialog-title">Photo</h2>
+        <img id="photo-dialog-image" alt="" />
+        <p class="photo-dialog-caption" id="photo-dialog-caption"></p>
+        <div class="dialog-actions">
+          <button class="button button-quiet" id="photo-dialog-delete" type="button">Delete photo</button>
+          <button class="button button-outline" id="photo-dialog-close" type="button">Close</button>
         </div>
       </div>
     </dialog>
