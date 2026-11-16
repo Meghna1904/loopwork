@@ -3,18 +3,35 @@ import { join } from "node:path";
 
 const root = new URL("../", import.meta.url);
 const output = new URL("../dist/", import.meta.url);
-const staticFiles = ["index.html", "app.css", "app.js", "base.css", "tokens.css"];
+const staticFiles = ["index.html", "app.css", "app.js", "guide.js", "base.css", "tokens.css"];
 
 await mkdir(output, { recursive: true });
 await Promise.all(staticFiles.map((file) => copyFile(new URL(file, root), new URL(file, output))));
 
-// The pattern engine is imported by app.js, so it has to ship with the build.
-const parserSource = new URL("../lib/parser/", import.meta.url);
-const parserOutput = new URL("../dist/lib/parser/", import.meta.url);
-await mkdir(parserOutput, { recursive: true });
-const parserFiles = await readdir(parserSource);
-await Promise.all(parserFiles.map((file) => copyFile(new URL(file, parserSource), new URL(file, parserOutput))));
+// Everything under lib/ is imported by the browser bundle: the pattern engine,
+// the terminology registry and the guide content. Copy the tree as it is so a
+// new module never has to be registered in two places.
+async function copyTree(fromUrl, toUrl) {
+  await mkdir(toUrl, { recursive: true });
+  for (const item of await readdir(fromUrl, { withFileTypes: true })) {
+    const source = new URL(item.name, fromUrl);
+    const target = new URL(item.name, toUrl);
+    if (item.isDirectory()) await copyTree(new URL(`${item.name}/`, fromUrl), target);
+    else await copyFile(source, target);
+  }
+}
+
+await copyTree(new URL("lib/", root), new URL("lib/", output));
+
+let copied = 0;
+async function countFiles(directoryUrl) {
+  for (const item of await readdir(directoryUrl, { withFileTypes: true })) {
+    if (item.isDirectory()) await countFiles(new URL(`${item.name}/`, directoryUrl));
+    else copied += 1;
+  }
+}
+await countFiles(new URL("lib/", output));
 
 process.stdout.write(
-  `Built ${staticFiles.length} static files and ${parserFiles.length} parser modules into ${join(process.cwd(), "dist")}\n`
+  `Built ${staticFiles.length} static files and ${copied} library modules into ${join(process.cwd(), "dist")}\n`
 );

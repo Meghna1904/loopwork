@@ -43,6 +43,9 @@
           <span class="save-time" id="save-time" hidden></span>
           <button class="save-retry" id="save-retry" type="button" hidden>Try again</button>
         </span>
+        <button class="button button-outline nav-guide" id="open-guide" type="button" aria-controls="guide-page">
+          <span class="nav-icon" aria-hidden="true">✧</span><span class="nav-label">Stitch guide</span>
+        </button>
         <button class="button button-outline nav-edit" id="open-patterns" type="button">
           <span class="nav-icon" aria-hidden="true">✎</span><span class="nav-label">Edit pattern</span>
         </button>
@@ -97,11 +100,16 @@
 
         <div class="work-grid">
           <section class="stitch-work" aria-labelledby="round-title">
+            <button class="work-photo" id="work-photo" type="button" hidden>
+              <img id="work-photo-image" alt="" />
+              <span id="work-photo-label">Reference</span>
+            </button>
             <div class="round-topline">
               <div>
                 <p class="round-index" id="round-index">Round 03 <span>of 05</span></p>
                 <h2 id="round-title">Build the petals</h2>
                 <p class="round-instruction" id="round-instruction">Two single crochets, then increase six times.</p>
+                <p class="round-terms-note" id="round-terms-note"></p>
               </div>
               <div class="round-controls">
                 <button class="icon-button round-nav-button" id="complete-round" type="button" title="Mark every stitch in this round complete">Mark round done</button>
@@ -124,10 +132,18 @@
 
             <div class="sequence-heading">
               <div><h3>Round sequence</h3><p id="sequence-hint">Grouped instructions with stitch-level controls</p></div>
-              <div class="view-toggle" role="group" aria-label="Sequence display">
-                <button type="button" data-view="grouped" aria-pressed="false">Groups</button>
-                <button type="button" data-view="individual" aria-pressed="false">Stitches</button>
-                <button type="button" data-view="both" aria-pressed="true">Both</button>
+              <div class="sequence-tools">
+                <div class="terms-toggle" role="group" aria-label="Stitch terminology">
+                  <span class="terms-toggle-label">Terms</span>
+                  <button type="button" data-terms="US" aria-pressed="true">US</button>
+                  <button type="button" data-terms="UK" aria-pressed="false">UK</button>
+                  <button type="button" data-terms="original" aria-pressed="false">As written</button>
+                </div>
+                <div class="view-toggle" role="group" aria-label="Sequence display">
+                  <button type="button" data-view="grouped" aria-pressed="false">Groups</button>
+                  <button type="button" data-view="individual" aria-pressed="false">Stitches</button>
+                  <button type="button" data-view="both" aria-pressed="true">Both</button>
+                </div>
               </div>
             </div>
             <div class="sequence-grid" id="sequence-grid" aria-live="polite"></div>
@@ -143,6 +159,13 @@
           </section>
 
           <aside class="pattern-aside" aria-label="Pattern overview">
+            <div class="aside-photo" id="aside-photo" hidden>
+              <button class="aside-photo-button" id="aside-photo-button" type="button">
+                <img id="aside-photo-image" alt="" hidden />
+                <span id="aside-photo-empty">Add a reference photo</span>
+              </button>
+              <p class="aside-photo-caption" id="aside-photo-caption"></p>
+            </div>
             <div class="aside-head"><h2>This pattern</h2><button class="text-button" id="edit-pattern-inline" type="button">Edit</button></div>
             <ol class="round-list" id="round-list"></ol>
             <div class="aside-note" id="parse-note" hidden></div>
@@ -172,6 +195,43 @@
       </main>
     </div>
 
+    <section class="guide-page" id="guide-page" hidden aria-labelledby="guide-title">
+      <div class="guide-wrap">
+        <header class="guide-hero">
+          <p class="guide-kicker">Reference</p>
+          <h1 id="guide-title">Stitch guide</h1>
+          <p class="guide-lede">Every stitch Loopwork knows, in the terms you learned them in. Choose a system once and the guide, the mapping table and your pattern all follow it.</p>
+          <div class="guide-controls">
+            <div class="guide-control">
+              <span class="guide-control-label" id="guide-terms-label">Terminology</span>
+              <div class="segmented" role="group" aria-labelledby="guide-terms-label">
+                <button type="button" data-system="US" aria-pressed="true">US terms</button>
+                <button type="button" data-system="UK" aria-pressed="false">UK terms</button>
+              </div>
+            </div>
+            <label class="guide-control guide-search">
+              <span class="guide-control-label">Search</span>
+              <input id="guide-search" type="search" placeholder="Stitch, abbreviation or technique" autocomplete="off" spellcheck="false" />
+            </label>
+          </div>
+          <div class="guide-filters" id="guide-filters" role="group" aria-label="Filter by stitch type"></div>
+          <div class="guide-tabs">
+            <div class="guide-tablist" role="tablist" aria-label="Guide sections">
+              <button type="button" role="tab" data-guide-tab="stitches" aria-selected="true">Stitches</button>
+              <button type="button" role="tab" data-guide-tab="techniques" aria-selected="false">Techniques</button>
+              <button type="button" role="tab" data-guide-tab="terms" aria-selected="false">US ↔ UK</button>
+            </div>
+            <a class="guide-back" href="#top" id="guide-back">← Back to my work</a>
+          </div>
+        </header>
+        <p class="guide-status" id="guide-status" role="status" aria-live="polite"></p>
+        <div class="guide-layout">
+          <div class="guide-results" id="guide-results"></div>
+          <aside class="guide-detail" id="guide-detail" aria-label="Selected entry"></aside>
+        </div>
+      </div>
+    </section>
+
     <dialog class="pattern-dialog" id="pattern-dialog" aria-labelledby="dialog-title">
       <form method="dialog" class="dialog-chrome"><button class="icon-button" value="cancel" aria-label="Close dialog">×</button></form>
       <div class="dialog-content">
@@ -189,6 +249,14 @@
           <p class="field-help">Use a round or row per line. Common forms like “(1 SC, INC) × 6” are expanded automatically.</p>
           <textarea id="pattern-source" rows="9" spellcheck="false"></textarea>
         </section>
+        <div class="terms-choose">
+          <span class="terms-choose-label" id="pattern-terms-label">This pattern is written in</span>
+          <div class="segmented" id="pattern-terms" role="group" aria-labelledby="pattern-terms-label">
+            <button type="button" data-pattern-terms="US" aria-pressed="true">US terms</button>
+            <button type="button" data-pattern-terms="UK" aria-pressed="false">UK terms</button>
+          </div>
+          <p class="field-help">Nothing is guessed from abbreviations: SC and DC mean different stitches in the two systems. This only changes the stitch names shown — your pattern text is kept exactly as written.</p>
+        </div>
         <section id="manual-panel" class="input-panel" role="tabpanel" hidden>
           <div class="manual-entry-row">
             <label>Round or row<input id="manual-label" value="Round 1" /></label>

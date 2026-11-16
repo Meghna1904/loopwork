@@ -1,10 +1,13 @@
 import { parseDocument, documentRounds, parseRoundDraft, STITCHES } from "./lib/parser/index.js";
+import { DEFAULT_SYSTEM, confirmedTerminology, normaliseSystem, operationAbbr, operationLabel } from "./lib/terminology.js";
+import { mountGuide, renderGuide } from "./guide.js";
 const STORAGE_KEY = "loopwork-projects-v1";
 const THEME_KEY = "loopwork-theme-v1";
 const API_URL = "/api/projects";
 const SESSION_URL = "/api/session";
 const SESSION_KEY = "loopwork-session-v1";
 const DIRTY_KEY = "loopwork-unsynced-v1";
+const TERMS_KEY = "loopwork-terms-v1";
 const SAMPLE_PATTERN = `Round 1: 6 SC in MR
 Round 2: (1 SC, INC) × 6
 Round 3: (2 SC, INC) × 6
@@ -14,6 +17,30 @@ Round 5: 30 SC`;
 const stitchNames = Object.fromEntries(Object.values(STITCHES).map((stitch) => [stitch.type, stitch.label]));
 
 function makeId() { return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
+
+function readTermSystem() {
+  try {
+    return normaliseSystem(localStorage.getItem(TERMS_KEY), DEFAULT_SYSTEM);
+  } catch {
+    return DEFAULT_SYSTEM;
+  }
+}
+
+// Changing the system is a choice for the whole app: the guide, the pattern
+// viewer and the current project's stored terminology all move together.
+function setTermSystem(system) {
+  termSystem = normaliseSystem(system, DEFAULT_SYSTEM);
+  try { localStorage.setItem(TERMS_KEY, termSystem); } catch { /* storage may be unavailable */ }
+  const project = typeof activeProject === "function" ? activeProject() : null;
+  if (project) project.terms = termSystem;
+}
+
+function operationText(operation) {
+  // "As written" never renames anything: a stitch shows the abbreviation the
+  // pattern itself used, and a step keeps its own wording.
+  if (termMode === "original") return operationAbbr(operation, "US") || operation.label || operation.type;
+  return operationLabel(operation, termSystem) || operation.label || operation.type;
+}
 
 function materializeOperation(operation) {
   return {
@@ -215,6 +242,11 @@ let pendingImport = null;
 let pendingDeleteProjectId = null;
 let serverReady = false;
 let restoring = false;
+// Terminology is a display choice the reader makes, never something inferred
+// from a pattern's abbreviations. "original" keeps the text as it was written.
+let termSystem = readTermSystem();
+let termMode = "terms";
+let pendingTerms = termSystem;
 let booted = false;
 let saveTimer = null;
 let saveAttempts = 0;
@@ -397,6 +429,10 @@ function mergeProjects(local, remote) {
     if (!other) { byId.set(project.id, project); continue; }
     const localTime = Date.parse(project.updatedAt || 0) || 0;
     const remoteTime = Date.parse(other.updatedAt || 0) || 0;
+    // The saved table has no column for the confirmed terminology, so a fetched
+    // copy arrives without it. The choice made on this device is kept rather
+    // than silently forgotten.
+    if (!other.terms && project.terms) other.terms = project.terms;
     byId.set(project.id, localTime >= remoteTime ? project : other);
   }
   const order = remote.map((project) => project.id).filter((id) => byId.has(id));
@@ -472,7 +508,8 @@ function renderSequence(round) {
       return `<button type="button" class="output-chip${locked ? " is-locked" : ""}" data-output="${op.id}:${output.id}" aria-pressed="${output.done}"${locked ? " disabled title=\"Work in order — finish the earlier stitches first\"" : ""} aria-label="${label}">${output.number}</button>`;
     }).join("");
     const grouping = op.outputCount > 1 ? `${op.outputs[0].number}–${op.outputs.at(-1).number}` : op.outputs[0]?.number ?? "—";
-    const instruction = stitchNames[op.type] || op.type;
+    const instruction = operationText(op);
+    const abbr = termMode === "terms" ? operationAbbr(op, termSystem) : "";
     const target = op.inputCount === 0 ? "No base stitch" : op.inputCount > 1 ? `Into ${op.inputCount} stitches` : `Base stitch ${op.inputStart}`;
     // A whole operation can only be ticked once the ones before it are done.
     const lockedOp = !complete && round.operations.slice(0, index).some((item) => !operationDone(item));
@@ -480,7 +517,7 @@ function renderSequence(round) {
     return `<article class="operation-cell ${isCurrent ? "is-current" : ""} ${complete ? "is-done" : ""}" data-operation="${op.id}">
       <button class="card-hitarea" type="button" data-complete-operation="${op.id}" aria-label="${escapeHtml(completeLabel)}" aria-pressed="${complete}"${lockedOp ? " disabled" : ""}></button>
       <div class="op-meta"><span>${escapeHtml(grouping)}</span><span>${op.outputCount > 1 ? `${outputsDone}/${op.outputCount}` : complete ? "Done" : ""}</span></div>
-      <strong class="op-name">${escapeHtml(op.label && op.label !== op.type ? op.label : instruction)}</strong>
+      <strong class="op-name">${escapeHtml(instruction)}${abbr ? ` <span class="op-abbr">${escapeHtml(abbr)}</span>` : ""}</strong>
       <span class="op-target">${escapeHtml(target)}</span>
       ${viewMode !== "grouped" && op.outputs.length ? `<div class="output-list">${outputButtons}</div>` : ""}
       ${viewMode !== "individual" ? `<span class="op-complete" aria-hidden="true"><span>${complete ? "✓" : "○"}</span>${op.outputCount > 1 ? "Complete group" : "Complete operation"}</span>` : ""}
@@ -500,6 +537,10 @@ const PHOTO_KINDS = { reference: "What I'm making", result: "What I made" };
 const MAX_PHOTOS_PER_KIND = 12;
 let pendingPhotoKind = "reference";
 let openPhotoId = null;
+// Uploads in flight and uploads that failed, kept outside the project so a
+// half-saved photo is never written to the database as if it were complete.
+let pendingUploads = [];
+let failedUploads = [];
 
 async function shrinkPhoto(file, maxSide = 900) {
   // Phone photos are several megabytes and the whole project list travels in one
@@ -522,16 +563,30 @@ function renderPhotos(project) {
   const section = $("#photo-section");
   if (!section) return;
   section.hidden = !project;
-  if (!project) return;
+  if (!project) {
+    $("#aside-photo").hidden = true;
+    $("#work-photo").hidden = true;
+    return;
+  }
 
   for (const kind of Object.keys(PHOTO_KINDS)) {
     const grid = $(`#photo-grid-${kind}`);
     if (!grid) continue;
     const photos = projectPhotos(project, kind);
+    const uploading = pendingUploads.filter((item) => item.kind === kind);
+    const failed = failedUploads.filter((item) => item.kind === kind);
     grid.innerHTML = photos.map((photo, index) => `
       <button class="photo-thumb" type="button" data-photo="${photo.id}" aria-label="Open ${escapeHtml(PHOTO_KINDS[kind])} photo ${index + 1}">
         <img src="${photo.data}" alt="${escapeHtml(photo.name || PHOTO_KINDS[kind])}" loading="lazy" />
-      </button>`).join("") + `
+      </button>`).join("") + uploading.map((item) => `
+      <div class="photo-thumb is-uploading" aria-busy="true" aria-label="Adding ${escapeHtml(item.name)}">
+        <img src="${item.preview}" alt="" />
+        <span class="photo-state">Adding…</span>
+      </div>`).join("") + failed.map((item) => `
+      <div class="photo-thumb is-failed" role="alert">
+        <span class="photo-state">Couldn’t add<br />${escapeHtml(item.name)}</span>
+        <button class="photo-dismiss" type="button" data-dismiss-photo="${item.id}" aria-label="Dismiss ${escapeHtml(item.name)}">×</button>
+      </div>`).join("") + `
       <button class="photo-add" type="button" data-add-photo="${kind}"${photos.length >= MAX_PHOTOS_PER_KIND ? " disabled" : ""}>
         <span aria-hidden="true">+</span><span>${photos.length ? "Add more" : "Add photos"}</span>
       </button>`;
@@ -544,6 +599,61 @@ function renderPhotos(project) {
     input.click();
   }));
   $$("[data-photo]", section).forEach((button) => button.addEventListener("click", () => openPhoto(button.dataset.photo)));
+  $$("[data-dismiss-photo]", section).forEach((button) => button.addEventListener("click", () => {
+    failedUploads = failedUploads.filter((item) => item.id !== button.dataset.dismissPhoto);
+    renderPhotos(activeProject());
+  }));
+  renderWorkingPhoto(project);
+}
+
+// The photo you actually look at while crocheting is the reference photo, so a
+// thumbnail of it lives next to the round: in the sticky aside on a wide screen,
+// in a small sticky strip above the round on a narrow one. When the project is
+// finished, the made photo takes its place.
+function renderWorkingPhoto(project) {
+  const finished = projectProgress(project) === 100 ? projectPhotos(project, "result").filter((photo) => photo.data).at(-1) : null;
+  const reference = projectPhotos(project, "reference").filter((photo) => photo.data).at(-1);
+  const shown = finished || reference;
+  const kind = finished ? "result" : "reference";
+  const caption = finished
+    ? "What I made · finished"
+    : shown
+      ? "Reference · click to open"
+      : "Add a photo of what you’re making";
+
+  const aside = $("#aside-photo");
+  if (aside) {
+    aside.hidden = false;
+    const image = $("#aside-photo-image");
+    const empty = $("#aside-photo-empty");
+    if (shown) {
+      image.src = shown.data;
+      image.alt = shown.name ? `Reference photo: ${shown.name}` : "Reference photo";
+      image.hidden = false;
+      empty.hidden = true;
+    } else {
+      image.removeAttribute("src");
+      image.hidden = true;
+      empty.hidden = false;
+    }
+    $("#aside-photo-caption").textContent = caption;
+    const button = $("#aside-photo-button");
+    button.dataset.photo = shown ? shown.id : "";
+    button.dataset.add = shown ? "" : kind;
+    button.setAttribute("aria-label", shown ? `Open the ${finished ? "finished" : "reference"} photo` : "Add a reference photo");
+  }
+
+  const strip = $("#work-photo");
+  if (strip) {
+    strip.hidden = !shown;
+    if (shown) {
+      $("#work-photo-image").src = shown.data;
+      $("#work-photo-image").alt = "";
+      $("#work-photo-label").textContent = finished ? "What I made" : "Reference";
+      strip.dataset.photo = shown.id;
+      strip.setAttribute("aria-label", `Open the ${finished ? "finished" : "reference"} photo`);
+    }
+  }
 }
 
 function openPhoto(photoId) {
@@ -561,7 +671,7 @@ async function addPhotos(files) {
   const project = activeProject();
   if (!project || !files.length) return;
   const kind = pendingPhotoKind;
-  const room = MAX_PHOTOS_PER_KIND - projectPhotos(project, kind).length;
+  const room = MAX_PHOTOS_PER_KIND - projectPhotos(project, kind).length - pendingUploads.filter((item) => item.kind === kind).length;
   if (room <= 0) {
     announce(`${PHOTO_KINDS[kind]} already holds ${MAX_PHOTOS_PER_KIND} photos.`);
     return;
@@ -571,21 +681,36 @@ async function addPhotos(files) {
     announce("Those files are not photos.");
     return;
   }
-  announce("Adding photos…");
+
+  // Show the picture straight away, then shrink it. The preview is the file
+  // itself, so nothing waits on the resize.
+  const tickets = chosen.map((file) => ({ id: makeId(), kind, name: file.name, preview: URL.createObjectURL(file) }));
+  pendingUploads = [...pendingUploads, ...tickets];
+  renderPhotos(project);
+
   const added = [];
-  for (const file of chosen) {
+  for (const [index, file] of chosen.entries()) {
+    const ticket = tickets[index];
     try {
-      added.push({ id: makeId(), kind, name: file.name, addedAt: new Date().toISOString(), data: await shrinkPhoto(file) });
-    } catch { /* skip a file the browser cannot decode */ }
+      added.push({ id: ticket.id, kind, name: ticket.name, addedAt: new Date().toISOString(), data: await shrinkPhoto(file) });
+    } catch {
+      failedUploads = [...failedUploads, { id: ticket.id, kind, name: ticket.name }];
+    } finally {
+      pendingUploads = pendingUploads.filter((item) => item.id !== ticket.id);
+      URL.revokeObjectURL(ticket.preview);
+    }
+    // Each finished photo appears as soon as it is ready.
+    if (added.length && project === activeProject()) {
+      project.photos = [...(project.photos || []).filter((photo) => !added.some((item) => item.id === photo.id)), ...added];
+      render();
+    } else {
+      renderPhotos(project);
+    }
   }
-  if (!added.length) {
-    announce("Those photos could not be read.");
-    return;
-  }
-  project.photos = [...(project.photos || []), ...added];
-  render();
+
   const skipped = files.length - chosen.length;
-  announce(`${added.length} photo${added.length === 1 ? "" : "s"} added${skipped > 0 ? `, ${skipped} kept out` : ""}.`);
+  const failed = chosen.length - added.length;
+  announce(`${added.length} photo${added.length === 1 ? "" : "s"} added${failed ? `, ${failed} could not be read` : ""}${skipped > 0 ? `, ${skipped} kept out` : ""}.`);
 }
 
 function renderRoundList(project, selectedRound) {
@@ -613,6 +738,13 @@ function render() {
   $("#photo-section").hidden = !hasProject;
   renderProjects();
   if (!project) { persist(); return; }
+  // A pattern that has had its terminology confirmed is shown in it, whichever
+  // project was open before.
+  const projectTerms = confirmedTerminology(project, null);
+  if (projectTerms && projectTerms !== termSystem) {
+    termSystem = projectTerms;
+    try { localStorage.setItem(TERMS_KEY, termSystem); } catch { /* storage may be unavailable */ }
+  }
   const round = currentRound();
   if (!round) return;
   const roundIndex = project.rounds.findIndex((item) => item.id === round.id);
@@ -644,12 +776,24 @@ function render() {
   $("#complete-round").setAttribute("aria-pressed", String(roundAllDone));
   $("#undo-progress").disabled = undoStack.length === 0;
   $("#next-up-number").textContent = finished ? "All done" : nextOutput ? `Stitch ${nextOutput.number}` : `Operation ${round.operations.indexOf(nextOp) + 1}`;
-  $("#next-up-operation").textContent = finished ? "This round is complete" : nextOp.label && nextOp.label !== nextOp.type ? nextOp.label : stitchNames[nextOp.type] || nextOp.type;
+  $("#next-up-operation").textContent = finished ? "This round is complete" : operationText(nextOp) || nextOp.type;
   $("#next-up-detail").textContent = finished ? "Choose the next round when you’re ready" : nextOp.outputCount > 1 ? `Work ${nextOp.outputCount} stitches into base stitch ${nextOp.inputStart}` : nextOp.inputCount === 0 ? "Work without using a base stitch" : `Work into base stitch ${nextOp.inputStart}`;
   $("#previous-round").disabled = roundIndex <= 0;
   $("#next-round").disabled = roundIndex >= project.rounds.length - 1;
   $$("[data-view]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.view === viewMode)));
   $$("[data-progress]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.progress === progressMode)));
+  // The terminology control sits with the sequence: it changes names, never the
+  // stored instruction, which stays visible above it exactly as written.
+  $$("[data-terms]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.terms === (termMode === "original" ? "original" : termSystem))));
+  const termsNote = $("#round-terms-note");
+  if (termsNote) {
+    const projectTerms = confirmedTerminology(project, null);
+    const written = projectTerms ? `Written in ${projectTerms} terms` : "Written-in terms not confirmed";
+    termsNote.textContent = termMode === "original"
+      ? `${written}. Shown as written, without renaming any stitch.`
+      : `${written}. Stitch names shown in ${termSystem} terms; the line above stays exactly as you pasted it.`;
+    termsNote.dataset.mode = termMode;
+  }
   const note = $("#parse-note");
   const repairMessage = project.patternRepaired ? "This saved pattern was rebuilt from its original instructions. Review the round totals before you continue." : "";
   // Every status reaches the page, not just the warning text: inferred counts,
@@ -801,6 +945,10 @@ function openDialog(mode = "edit") {
   $("#pattern-name").value = project?.name || "";
   $("#pattern-description").value = project?.description || "";
   $("#pattern-source").value = project?.originalPattern || "";
+  // An existing project keeps the terms it was saved with; a new one starts
+  // from the reader's current choice. Either way it is shown, never guessed.
+  pendingTerms = confirmedTerminology(project, termSystem) || termSystem;
+  renderPatternTerms();
   $("#parse-review").innerHTML = "";
   $("#save-pattern").textContent = mode === "new" ? "Review and save" : "Review changes";
   $("#save-pattern").dataset.action = mode;
@@ -854,7 +1002,7 @@ function reviewPattern() {
       warnings.push(`${round.label}: ${round.warning}`);
     }
   });
-  pendingImport = { rounds: parsed.rounds, source, name, description: $("#pattern-description").value.trim(), warnings, modified: false, stale: false };
+  pendingImport = { rounds: parsed.rounds, source, name, description: $("#pattern-description").value.trim(), terms: pendingTerms, warnings, modified: false, stale: false };
   renderPendingReview();
   $("#save-pattern").textContent = "Accept pattern";
   setReviewState("reviewed");
@@ -925,12 +1073,13 @@ function savePattern() {
   if (previous) {
     previous.name = pendingImport.name;
     previous.description = pendingImport.description;
+    previous.terms = pendingImport.terms || termSystem;
     previous.originalPattern = pendingImport.source;
     previous.rounds = pendingImport.rounds;
     previous.currentRoundId = pendingImport.rounds[0].id;
     previous.patternRepaired = false;
   } else {
-    const project = { id: makeId(), name: pendingImport.name, description: pendingImport.description, type: "custom", originalPattern: pendingImport.source, rounds: pendingImport.rounds, currentRoundId: pendingImport.rounds[0].id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const project = { id: makeId(), name: pendingImport.name, description: pendingImport.description, terms: pendingImport.terms || termSystem, type: "custom", originalPattern: pendingImport.source, rounds: pendingImport.rounds, currentRoundId: pendingImport.rounds[0].id, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     projects.unshift(project);
     activeProjectId = project.id;
   }
@@ -938,6 +1087,10 @@ function savePattern() {
   $("#pattern-dialog").close();
   render();
   announce("Pattern saved and ready to follow.");
+}
+
+function renderPatternTerms() {
+  $$("[data-pattern-terms]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.patternTerms === pendingTerms)));
 }
 
 function addManualRound() {
@@ -975,6 +1128,18 @@ $("#review-again").addEventListener("click", reviewPattern);
 $("#add-manual-round").addEventListener("click", addManualRound);
 $$('[data-input-mode]').forEach((tab) => tab.addEventListener("click", () => setInputMode(tab.dataset.inputMode)));
 $$('[data-view]').forEach((button) => button.addEventListener("click", () => { viewMode = button.dataset.view; render(); }));
+$$('[data-terms]').forEach((button) => button.addEventListener("click", () => {
+  const value = button.dataset.terms;
+  if (value === "original") termMode = "original";
+  else { termMode = "terms"; setTermSystem(value); }
+  render();
+  renderGuide();
+}));
+$$('[data-pattern-terms]').forEach((button) => button.addEventListener("click", () => {
+  pendingTerms = button.dataset.patternTerms;
+  renderPatternTerms();
+}));
+$("#open-guide").addEventListener("click", () => { location.hash = "#guide"; });
 $$('[data-progress]').forEach((button) => button.addEventListener("click", () => { progressMode = button.dataset.progress; render(); }));
 $("#pattern-dialog").addEventListener("click", (event) => { if (event.target === $("#pattern-dialog")) $("#pattern-dialog").close(); });
 $("#pattern-dialog").addEventListener("close", () => { pendingImport = null; });
@@ -1070,6 +1235,18 @@ async function submitLogin(event) {
 }
 
 $("#photo-input").addEventListener("change", (event) => addPhotos([...(event.target.files || [])]));
+// The working thumbnail is the fastest way to add a photo: an empty one opens
+// the picker, a full one opens the lightbox.
+for (const selector of ["#aside-photo-button", "#work-photo"]) {
+  $(selector).addEventListener("click", () => {
+    const button = $(selector);
+    if (button.dataset.photo) { openPhoto(button.dataset.photo); return; }
+    pendingPhotoKind = button.dataset.add || "reference";
+    const input = $("#photo-input");
+    input.value = "";
+    input.click();
+  });
+}
 $("#photo-dialog-close").addEventListener("click", () => $("#photo-dialog").close());
 $("#photo-dialog-delete").addEventListener("click", () => {
   const project = activeProject();
@@ -1162,6 +1339,33 @@ document.addEventListener("click", (event) => {
   toggleMenu(false);
 });
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") toggleMenu(false); });
+
+// ---- stitch guide page -----------------------------------------------------
+
+function routeGuide() {
+  const page = $("#guide-page");
+  if (!page) return;
+  const open = location.hash.startsWith("#guide");
+  page.hidden = !open;
+  $(".app-shell").hidden = open;
+  $("#open-guide").setAttribute("aria-pressed", String(open));
+  document.title = open ? "Stitch guide · Loopwork" : "Loopwork · Crochet pattern companion";
+  if (open) renderGuide();
+  else render();
+  window.scrollTo(0, 0);
+}
+
+mountGuide({
+  getSystem: () => termSystem,
+  onSystemChange: (system) => {
+    setTermSystem(system);
+    // The workspace copy of the sequence follows the same choice, so the two
+    // pages can never disagree about what a stitch is called.
+    render();
+  }
+});
+window.addEventListener("hashchange", routeGuide);
+routeGuide();
 
 applyTheme(document.documentElement.dataset.theme || "light");
 if (session) startApp(); else openLoginScreen();
