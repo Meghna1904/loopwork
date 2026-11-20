@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Loopwork">
+  <title>Loopwork</title>
+  <rect width="32" height="32" fill="#144BB7"/>
+  <g fill="none" stroke="#F9F5EC" stroke-width="3.9" stroke-linecap="round">
+    <path d="M23.7 14.7A7.8 7.8 0 1 0 21.5 21.5"/>
+    <path d="M21.5 21.5C22.9 24.1 24.6 25.6 26.6 26.4"/>
+  </g>
+</svg>

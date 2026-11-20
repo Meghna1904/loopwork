@@ -3,7 +3,10 @@ import { join } from "node:path";
 
 const root = new URL("../", import.meta.url);
 const output = new URL("../dist/", import.meta.url);
-const staticFiles = ["index.html", "app.css", "app.js", "guide.js", "base.css", "tokens.css"];
+const staticFiles = [
+  "index.html", "app.css", "app.js", "guide.js", "base.css", "tokens.css",
+  "favicon.svg", "favicon-32.png", "apple-touch-icon.png"
+];
 
 // Start clean every time: a leftover file from an older build layout used to
 // keep shipping, and a stale module at a stale path hides a broken one.
